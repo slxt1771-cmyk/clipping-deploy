@@ -163,7 +163,11 @@ public partial class SetupViewModel : ObservableObject
         using var probe = new ObsController();
         try
         {
-            if (AutoLaunchObs && !new ObsProcessManager().IsObsRunning())
+            // Checked regardless of the AutoLaunchObs preference: the wizard never launches OBS itself
+            // (that only happens once the app proper starts), so "OBS is not running" is the accurate and
+            // more actionable message either way - without it the user just sees a generic timeout and
+            // starts second-guessing the password they only just pasted in.
+            if (!new ObsProcessManager().IsObsRunning())
             {
                 ConnectionTestResult = "OBS isn't running - start OBS Studio first, then test again.";
                 return;
