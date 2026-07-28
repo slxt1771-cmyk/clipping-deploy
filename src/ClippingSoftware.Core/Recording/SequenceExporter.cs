@@ -1,5 +1,3 @@
-using System.Diagnostics;
-
 namespace ClippingSoftware.Core.Recording;
 
 /// <summary>
@@ -73,37 +71,25 @@ public class SequenceExporter(ClipTrimmer? clipTrimmer = null, string? ffmpegPat
 
         try
         {
-            var startInfo = new ProcessStartInfo
+            var (exitCode, stderr) = await FfmpegProcess.RunAsync(_ffmpegPath, args =>
             {
-                FileName = _ffmpegPath,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            startInfo.ArgumentList.Add("-y");
-            startInfo.ArgumentList.Add("-v");
-            startInfo.ArgumentList.Add("error");
-            startInfo.ArgumentList.Add("-f");
-            startInfo.ArgumentList.Add("concat");
-            startInfo.ArgumentList.Add("-safe");
-            startInfo.ArgumentList.Add("0");
-            startInfo.ArgumentList.Add("-i");
-            startInfo.ArgumentList.Add(listFilePath);
-            startInfo.ArgumentList.Add("-c");
-            startInfo.ArgumentList.Add("copy");
-            startInfo.ArgumentList.Add(outputPath);
+                args.Add("-y");
+                args.Add("-v");
+                args.Add("error");
+                args.Add("-f");
+                args.Add("concat");
+                args.Add("-safe");
+                args.Add("0");
+                args.Add("-i");
+                args.Add(listFilePath);
+                args.Add("-c");
+                args.Add("copy");
+                args.Add(outputPath);
+            }, cancellationToken);
 
-            using var process = Process.Start(startInfo)
-                ?? throw new InvalidOperationException("Failed to start ffmpeg.");
-
-            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken);
-            var stderr = await stderrTask;
-
-            if (process.ExitCode != 0 || !File.Exists(outputPath))
+            if (exitCode != 0 || !File.Exists(outputPath))
             {
-                throw new InvalidOperationException($"ffmpeg concat failed (exit {process.ExitCode}): {stderr}");
+                throw new InvalidOperationException($"ffmpeg concat failed (exit {exitCode}): {stderr}");
             }
         }
         finally

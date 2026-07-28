@@ -26,6 +26,7 @@ changes; treat it as living, not historical.
 | M14 | Visual polish pass: custom control templates for the four controls still rendering with stock OS chrome | Done. `Theme.xaml` gained full `ControlTemplate`s for `CheckBox` (flat 16x16 box, tertiary checkmark), `RadioButton` (matching circular indicator), `ComboBox` (flat hairline border, hand-drawn chevron, dark popup, styled `ComboBoxItem`), and `ScrollBar` (thin track + pill thumb, no arrow buttons - restyling the type is enough since `ScrollViewer`'s own stock template just hosts `ScrollBar` internally, so every `ScrollViewer` in the app picked this up for free). `Slider`'s thumb was resized/rounded since it's now shared between the wide Trim Editor scrub bar and the compact per-row volume sliders added in M11/M13. Added hover states that didn't exist before: clip tiles in `ClipBrowserView` brighten their border on hover, `DataGridRow` gets a subtle background lift. While wiring this up, found and fixed 5 places (`MainWindow.xaml` x3, `GameProfilesView.xaml` x2) where an inline `ComboBox.Style`/`RadioButton.Style` block used for visibility/IsChecked toggling had no `BasedOn`, which silently discards the implicit type style entirely in WPF - those controls would have kept rendering with stock OS chrome despite the new theme. **Deliberately not done**: a custom window titlebar (replacing the native Windows chrome) - the other big lever for this look, but WPF's `WindowChrome` has a well-known content-bleeds-past-screen-edge bug specifically when combined with `WindowState="Maximized"` (which this window defaults to), and getting the fix wrong risks breaking resize/maximize/close in ways that can't be verified without eyes on the running app. Flagged as a follow-up rather than attempted blind. |
 | M15 | Nav moved to a left icon rail with Clips as the default tab, runtime Primary/Secondary accent-color customization, and the custom titlebar M14 deliberately deferred | Done - see below for detail on each. |
 | M16 | Tab restructure (Clips/Capture/Settings, in that order), Capture-vs-everything-else split, embedded per-clip editor with autosaved drafts, a simple multi-clip Sequence editor, and a layout/centering pass on Capture+Settings | Done - see below for detail on each. |
+| M18 | Packaging: Setup.exe installer wizard + Windows CI build, install-relative asset paths, in-app first-run setup wizard, and the bug-fix/deep-clean pass that packaging forced | Done — see below for detail. |
 | M17 | Page-by-page polish pass: Clips header reflow + a Filters popup, and folding Capture back into Settings | Done. **Clips**: the title row (`ClipBrowserView.xaml`) now right-docks SEARCH/FILTERS/REFRESH in line with "CLIP-SYS // CL-001" instead of a separate row below it, and the "MODULE_ID: CLIP_LIBRARY" subtitle is gone (redundant with the tab's own context). LIBRARY/EDIT/TAGS became one coherent pill group (`Theme.xaml`'s new `SubNavButtonStyle`): dim/transparent by default, white label + tertiary bottom-accent when selected - same visual grammar the left icon rail already used for its own selected state, just applied here too. The always-visible tag-chip row moved into a new FILTERS popup (`ClipBrowserViewModel.IsFilterPanelOpen`/`ToggleFilterPanelCommand`), which also gained a Clips-vs-Recordings segmented filter (`TypeFilter`, checked against `ClipMetadata.IsTrimmedCopy` in `FilterClip`) - lets a trimmed export be told apart from a raw replay-buffer/manual recording. **Capture folded into Settings**: the separate Capture tab is gone - nav is just Clips/Settings now. Its CAPTURE SOURCE and AUDIO SOURCES groups joined Settings' existing WrapPanel (still 340px/uniform-width, now six groups in a row instead of two-plus-four split across tabs), and Game Profiles moved down with them, unchanged in its own bounded (non-scrolled) row below the WrapPanel's ScrollViewer for the same reason it always needed one - a DataGrid's "*" row collapses to zero inside an infinite-height ScrollViewer. CONNECT (previously floating in its own row next to Start/Stop Recording) is now a centered action button inside the CONNECTION group, next to the host/port/password fields it actually connects. Start/Stop Recording and the global StatusMessage moved to the title bar (`MainWindow.xaml`'s row 0) - reachable from either tab now, same reasoning as the LIVE/BUFFER lamps already living there. **Every milestone row above that says "Capture tab"** (M7, M8, M12, M13, M14) is describing where things lived at the time they were built - that page doesn't exist anymore, its content is on Settings now; left as historical record rather than rewritten, per this doc's own convention of layering later changes as notes (see M15/M16) instead of editing old rows in place. |
 
 Multi-track audio recording itself (a clip's container carrying more than the old fixed
@@ -97,7 +98,59 @@ once backfill had already copied their data into `AudioTracksJson`; see M15's bu
   actually been broken. If tab content ever silently goes blank again, verify with a `PrintWindow`
   capture before trusting `System.Windows.Automation` output in this environment.
 
-All of M1-M17 plus the two originally-unnumbered gaps (game profile UI, hotkey rebinding UI)
+**M18 in detail — packaging, and the bug-fix pass that had to come with it:**
+
+- **It ships as a Setup.exe now.** `installer/ClippingSoftware.iss` (Inno Setup) produces the wizard a
+  user downloads and double-clicks: install location, Start Menu/desktop shortcuts, an optional
+  run-at-sign-in shortcut, an uninstaller, and an up-front warning if OBS Studio isn't installed.
+  `.github/workflows/release.yml` (windows-latest) builds it on every push - which doubles as this
+  repo's only real build check, since WPF can't compile anywhere else and there's no test project. It
+  publishes self-contained win-x64 (so no .NET install is required of the user), fetches a pinned ffmpeg
+  build into `tools/ffmpeg/`, verifies the published layout actually contains `assets/` and
+  `tools/ffmpeg/`, compiles the installer, and uploads it as an artifact; a `v*` tag also cuts a GitHub
+  release. See `INSTALL.md`.
+- **Paths had to stop being machine-specific first.** `FfmpegTools`, `GameDatabase` and `SoundCuePlayer`
+  each walked up from `AppContext.BaseDirectory` looking for `assets/`/`tools/` and *fell back to
+  `D:\claude stuff\clipping software\...`*. Nothing ever copied those trees into the build output, so
+  the walk-up only worked because a `bin/` folder sits under the repo root - an installed copy has no
+  repo above it and would have hit the dead fallback path on every launch. Replaced by
+  `Core/BundledResources.cs` (beside-the-exe first, then walk up, no machine fallback), with the App
+  csproj now actually copying both trees into the output. `AppSettings`' storage defaults moved to
+  `Videos\ClippingSoftware\{Recordings,Exports}`.
+- **First-run setup wizard** (`Views/SetupWindow` + `SetupViewModel`), shown once before `MainWindow`
+  exists, gated on the new `AppSettings.HasCompletedFirstRunSetup`. Four steps: install integrity check
+  (is bundled ffmpeg actually present), OBS location (auto-detected by `Core/Obs/ObsInstallLocator`,
+  correctable by Browse), obs-websocket host/port/**password** with a live Test Connection, and storage
+  folders + clip length. The password step is the one genuinely unavoidable manual task - OBS 28+
+  generates a per-machine password and enables auth by default, so a fresh install can never connect
+  until it's copied across, and no amount of packaging can bundle it. The migration deliberately marks
+  *pre-existing* installs as already set up (`DEFAULT 1` on the added column) so this machine isn't
+  re-interrogated about settings that already work.
+- **Two settings were pure decoration and are now actually applied.** `ClipStorageFolder` was persisted
+  and shown in Settings but never sent to OBS, so recordings landed wherever OBS happened to be
+  configured rather than where the UI said. Worse, `ReplayBufferLengthSeconds` - *how long a saved clip
+  is*, the entire premise of the app - was stored in the database and read by nothing at all; the buffer
+  always used whatever OBS's own profile said. Both now go through
+  `ObsController.SetRecordDirectory`/`SetReplayBufferSeconds` from
+  `MainViewModel.ApplyRecordingOutputSettings`, applied on connect *before* `StartReplayBuffer` (OBS
+  only reads them when the output starts) and again after a settings save. Clip length also gained a
+  Settings-tab field, since it previously had no UI anywhere.
+- **Other real defects fixed in the same pass.** (a) All five ffmpeg/ffprobe call sites redirected
+  stdout and then read only stderr - a full pipe buffer would have blocked the child process forever and
+  hung a clip ingest with no error and no timeout; they now share `Recording/FfmpegProcess`, which
+  drains both pipes concurrently. (b) `ClipTrimmer`'s output filename had 1-second resolution, so
+  `SequenceExporter` - which trims every segment back-to-back into one folder - would silently overwrite
+  one segment with another and concatenate the duplicate whenever a sequence used two ranges from the
+  same clip; a short unique suffix fixes it. (c) `MainViewModel.Connect` let `EnsureRunning`'s
+  `FileNotFoundException` escape, crashing the app on a button click when the OBS path was wrong - the
+  single most likely thing to be wrong on a fresh install. (d) Auto-tag colors were picked with
+  `string.GetHashCode()`, which is randomly seeded per process on .NET Core, so the "deterministic"
+  color a game got depended on which run first saw it; replaced with an inlined FNV-1a. (e) A missing
+  `tray.ico`, an unparseable `known-games.json`, or a missing sound WAV each took the app down at
+  startup from a field initializer; all three now degrade instead. (f) `ThemeManager` derived and wrote
+  two brushes no XAML consumes.
+
+All of M1-M18 plus the two originally-unnumbered gaps (game profile UI, hotkey rebinding UI)
 are now done. What's left is smaller polish items — see below.
 
 - **Visual identity pass.** The app moved from an early tally-lamp red/green/amber palette to a
@@ -153,14 +206,20 @@ are now done. What's left is smaller polish items — see below.
 - **Heavy-switch profile changes cost ~1-2s of replay-buffer downtime** by design (OBS
   rejects video-settings/profile changes while an output is running). This was an accepted
   tradeoff during M5, not a bug to "fix" by finding a workaround.
-- **Hardcoded absolute paths** (`D:\claude stuff\clipping software\...` fallbacks in
-  `FfmpegTools`, `GameDatabase`, and the default `ObsExecutablePath`/`ClipStorageFolder` in
-  `AppSettings`) are deliberate for this single-machine setup, not leftover debug code.
+- ~~**Hardcoded absolute paths** are deliberate for this single-machine setup.~~ **No longer true as of
+  M18** - packaging the app made this actively wrong (an install under Program Files can't reach a
+  `D:\claude stuff\` fallback, and no other machine has that folder). Bundled content now resolves via
+  `Core/BundledResources.cs`; user data defaults under `Videos\ClippingSoftware`. Don't reintroduce
+  absolute paths.
 - **Trim exports default to stream-copy, not frame-accurate** (see `ClipTrimmer`'s doc comment) —
   a deliberate speed/simplicity default; frame-accurate re-encode is now available as an opt-in
   checkbox, not the default, for the same export-time/quality reasons.
 
 ## Suggested next work (in rough priority order)
+
+0. Sign the installer. `Setup.exe` is unsigned, so Windows SmartScreen shows an "unknown publisher"
+   warning that the user has to click through (documented in `INSTALL.md`). Fixing it needs a paid
+   code-signing certificate, which is a purchase decision, not a code change.
 
 1. General polish/refinement pass now that M1-M17 + the profile/hotkey UIs + visual identity are
    all in: UX rough edges, error-message clarity, XAML layout tightening, etc. — nothing specific
@@ -179,7 +238,7 @@ parsing, before applying - `ColorUtils.TryParseHex` itself is untouched (it's al
 
 ## Non-goals (don't add unless explicitly asked)
 
-- Multi-machine/config-file-based settings, installers, auto-update.
+- Config-file-based settings, auto-update. (Installers are *no longer* a non-goal - see M18.)
 - Cloud upload/sharing of clips.
 - Support for capture backends other than OBS.
 - Automated tests as a blanket requirement — add them for genuinely tricky logic (e.g.

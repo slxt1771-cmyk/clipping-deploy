@@ -1,5 +1,3 @@
-using System.Diagnostics;
-
 namespace ClippingSoftware.Core.Recording;
 
 /// <summary>
@@ -37,41 +35,29 @@ public class AudioTrackExtractor(string? ffmpegPath = null)
             .Select(i => $"{outputBasePath}.track{i}.m4a")
             .ToList();
 
-        var startInfo = new ProcessStartInfo
+        var (exitCode, stderr) = await FfmpegProcess.RunAsync(_ffmpegPath, args =>
         {
-            FileName = _ffmpegPath,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        startInfo.ArgumentList.Add("-y");
-        startInfo.ArgumentList.Add("-v");
-        startInfo.ArgumentList.Add("error");
-        startInfo.ArgumentList.Add("-i");
-        startInfo.ArgumentList.Add(sourceFilePath);
+            args.Add("-y");
+            args.Add("-v");
+            args.Add("error");
+            args.Add("-i");
+            args.Add(sourceFilePath);
 
-        for (var i = 0; i < streamCount; i++)
+            for (var i = 0; i < streamCount; i++)
+            {
+                args.Add("-map");
+                args.Add($"0:a:{i}");
+                args.Add("-c:a");
+                args.Add("aac");
+                args.Add("-b:a");
+                args.Add("192k");
+                args.Add(outputPaths[i]);
+            }
+        }, cancellationToken);
+
+        if (exitCode != 0 || outputPaths.Any(p => !File.Exists(p)))
         {
-            startInfo.ArgumentList.Add("-map");
-            startInfo.ArgumentList.Add($"0:a:{i}");
-            startInfo.ArgumentList.Add("-c:a");
-            startInfo.ArgumentList.Add("aac");
-            startInfo.ArgumentList.Add("-b:a");
-            startInfo.ArgumentList.Add("192k");
-            startInfo.ArgumentList.Add(outputPaths[i]);
-        }
-
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Failed to start ffmpeg.");
-
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        var stderr = await stderrTask;
-
-        if (process.ExitCode != 0 || outputPaths.Any(p => !File.Exists(p)))
-        {
-            throw new InvalidOperationException($"ffmpeg audio track extraction failed (exit {process.ExitCode}): {stderr}");
+            throw new InvalidOperationException($"ffmpeg audio track extraction failed (exit {exitCode}): {stderr}");
         }
 
         return outputPaths;

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 
 namespace ClippingSoftware.Core.Recording;
@@ -20,37 +19,25 @@ public class ThumbnailGenerator(string? ffmpegPath = null)
 
         var midpointSeconds = Math.Max(0, clipDuration.TotalSeconds / 2);
 
-        var startInfo = new ProcessStartInfo
+        var (exitCode, stderr) = await FfmpegProcess.RunAsync(_ffmpegPath, args =>
         {
-            FileName = _ffmpegPath,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        startInfo.ArgumentList.Add("-y");
-        startInfo.ArgumentList.Add("-v");
-        startInfo.ArgumentList.Add("error");
-        startInfo.ArgumentList.Add("-ss");
-        startInfo.ArgumentList.Add(midpointSeconds.ToString(CultureInfo.InvariantCulture));
-        startInfo.ArgumentList.Add("-i");
-        startInfo.ArgumentList.Add(inputFilePath);
-        startInfo.ArgumentList.Add("-frames:v");
-        startInfo.ArgumentList.Add("1");
-        startInfo.ArgumentList.Add("-vf");
-        startInfo.ArgumentList.Add("scale=320:-1");
-        startInfo.ArgumentList.Add(outputJpgPath);
+            args.Add("-y");
+            args.Add("-v");
+            args.Add("error");
+            args.Add("-ss");
+            args.Add(midpointSeconds.ToString(CultureInfo.InvariantCulture));
+            args.Add("-i");
+            args.Add(inputFilePath);
+            args.Add("-frames:v");
+            args.Add("1");
+            args.Add("-vf");
+            args.Add("scale=320:-1");
+            args.Add(outputJpgPath);
+        }, cancellationToken);
 
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Failed to start ffmpeg.");
-
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        var stderr = await stderrTask;
-
-        if (process.ExitCode != 0 || !File.Exists(outputJpgPath))
+        if (exitCode != 0 || !File.Exists(outputJpgPath))
         {
-            throw new InvalidOperationException($"ffmpeg thumbnail generation failed (exit {process.ExitCode}): {stderr}");
+            throw new InvalidOperationException($"ffmpeg thumbnail generation failed (exit {exitCode}): {stderr}");
         }
     }
 }

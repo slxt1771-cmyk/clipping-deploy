@@ -65,6 +65,12 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private string _clipStorageFolder = string.Empty;
 
+    /// <summary>How many seconds of history the replay buffer keeps, i.e. how long a saved clip is.
+    /// Applied to OBS via ApplyRecordingOutputSettings - OBS reads it when the buffer output starts, so a
+    /// change only takes hold on the next buffer restart (reconnect), not instantly.</summary>
+    [ObservableProperty]
+    private int _replayBufferLengthSeconds = 60;
+
     [ObservableProperty]
     private bool _isConnected;
 
@@ -215,6 +221,12 @@ public partial class MainViewModel : ObservableObject
                 StatusMessage = $"Failed to restore audio sources: {ex.Message}";
             }
 
+            // Both of these have to land before StartReplayBuffer: OBS reads the record directory and the
+            // buffer duration when the output starts, so applying them afterwards would take effect only
+            // on the next connect. Each is separately best-effort - an older OBS without SetRecordDirectory
+            // shouldn't cost us the buffer-length setting, or the replay buffer itself.
+            ApplyRecordingOutputSettings();
+
             try
             {
                 _obsController.StartReplayBuffer();
@@ -272,6 +284,7 @@ public partial class MainViewModel : ObservableObject
         ObsPort = Settings.ObsWebsocketPort;
         ObsPassword = Settings.ObsWebsocketPassword;
         ClipStorageFolder = Settings.ClipStorageFolder;
+        ReplayBufferLengthSeconds = Settings.ReplayBufferLengthSeconds;
         ReplayBufferSaveHotkeyVk = Settings.ReplayBufferSaveHotkeyVk;
         ReplayBufferSaveHotkeyModifiers = Settings.ReplayBufferSaveHotkeyModifiers;
         StartStopRecordingHotkeyVk = Settings.StartStopRecordingHotkeyVk;
@@ -301,8 +314,12 @@ public partial class MainViewModel : ObservableObject
         {
             var settings = _settingsRepository.Load();
             var obsWasAlreadyRunning = _processManager.IsObsRunning();
-            StatusMessage = "Launching OBS...";
-            _processManager.EnsureRunning(settings.ObsExecutablePath);
+
+            if (settings.AutoLaunchObs && !obsWasAlreadyRunning)
+            {
+                StatusMessage = "Launching OBS...";
+                _processManager.EnsureRunning(settings.ObsExecutablePath);
+            }
 
             // Give a freshly-launched OBS time to open its websocket port before the first attempt.
             await Task.Delay(obsWasAlreadyRunning ? 500 : 5000);
@@ -329,8 +346,25 @@ public partial class MainViewModel : ObservableObject
     private void Connect()
     {
         StatusMessage = "Connecting...";
-        _processManager.EnsureRunning(_settingsRepository.Load().ObsExecutablePath);
-        _obsController.Connect(ObsHost, ObsPort, ObsPassword);
+
+        // EnsureRunning throws FileNotFoundException when the configured OBS path is wrong, which is the
+        // single most likely thing to be wrong on a fresh install. Unhandled, that took down the whole app
+        // from a button click; surfacing it as a status message keeps the user in the Settings tab where
+        // the path they need to correct actually is.
+        try
+        {
+            var settings = _settingsRepository.Load();
+            if (settings.AutoLaunchObs)
+            {
+                _processManager.EnsureRunning(settings.ObsExecutablePath);
+            }
+
+            _obsController.Connect(ObsHost, ObsPort, ObsPassword);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Could not connect: {ex.Message}";
+        }
     }
 
     [RelayCommand(CanExecute = nameof(CanStartRecord))]
@@ -522,6 +556,46 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Pushes the two recording-output settings that live in this app's database but are enforced by OBS:
+    /// where recordings are written, and how many seconds of history the replay buffer keeps. Called on
+    /// every connect (before the buffer starts) and again after a settings save, so a change takes effect
+    /// on the next buffer restart rather than only after an app restart.
+    ///
+    /// Failures are reported but never thrown: SetRecordDirectory needs OBS 30+, and neither setting is
+    /// worth losing the connection over - recording still works using OBS's own configuration.
+    /// </summary>
+    private void ApplyRecordingOutputSettings()
+    {
+        if (!_obsController.IsConnected)
+        {
+            return;
+        }
+
+        try
+        {
+            _obsController.SetReplayBufferSeconds(ReplayBufferLengthSeconds);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Could not set replay buffer length: {ex.Message}";
+        }
+
+        if (string.IsNullOrWhiteSpace(ClipStorageFolder))
+        {
+            return;
+        }
+
+        try
+        {
+            _obsController.SetRecordDirectory(ClipStorageFolder);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Could not set the recording folder in OBS (needs OBS 30+): {ex.Message}";
+        }
+    }
+
     private void RefreshAudioSources()
     {
         AudioSources.Clear();
@@ -553,6 +627,7 @@ public partial class MainViewModel : ObservableObject
         settings.ObsWebsocketPort = ObsPort;
         settings.ObsWebsocketPassword = ObsPassword;
         settings.ClipStorageFolder = ClipStorageFolder;
+        settings.ReplayBufferLengthSeconds = ReplayBufferLengthSeconds;
         settings.ReplayBufferSaveHotkeyVk = ReplayBufferSaveHotkeyVk;
         settings.ReplayBufferSaveHotkeyModifiers = ReplayBufferSaveHotkeyModifiers;
         settings.StartStopRecordingHotkeyVk = StartStopRecordingHotkeyVk;
@@ -570,6 +645,10 @@ public partial class MainViewModel : ObservableObject
         // first - Save shouldn't silently leave the preview one step behind the DB.
         ThemeManager.ApplyColors(PrimaryColorHex, SecondaryColorHex, TertiaryColorHex, QuaternaryColorHex);
         StatusMessage = "Settings saved.";
+
+        // Re-push the OBS-enforced settings so a changed clip folder / buffer length doesn't sit in the
+        // database until the next app restart.
+        ApplyRecordingOutputSettings();
 
         // May overwrite the "Settings saved." message above with a registration failure - that's
         // intended, a failed re-registration is more important for the user to see than the generic
@@ -641,6 +720,7 @@ public partial class MainViewModel : ObservableObject
         _gameDetectionService.Dispose();
         ClipBrowser.Dispose();
         _ingestCoordinator.Dispose();
+        _soundCuePlayer.Dispose();
         _obsController.Dispose();
     }
 }

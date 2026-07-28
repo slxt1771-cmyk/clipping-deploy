@@ -1,0 +1,145 @@
+name: Build installer
+
+# Two jobs' worth of purpose in one:
+#   - On every push/PR it is the build check. There is no test project (deliberately - see PROJECT.md),
+#     and WPF only compiles on Windows, so "does it build on windows-latest" is the real gate.
+#   - On a tag (or a manual run) the Setup.exe it produces is the actual release artifact users download.
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_VERSION: "8.0.x"
+  # Pinned rather than "latest": gyan.dev's "latest" URL moves without notice, and an installer whose
+  # bundled ffmpeg silently changed between builds is not something anyone would notice until a clip
+  # failed to process. Bump this deliberately.
+  FFMPEG_URL: "https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip"
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # The version the app reports and the version stamped on Setup.exe come from the same place -
+      # the csproj - so they can't drift. A tagged build overrides it with the tag itself.
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $csproj = "src/ClippingSoftware.App/ClippingSoftware.App.csproj"
+          $version = ([xml](Get-Content $csproj)).Project.PropertyGroup.Version | Where-Object { $_ }
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $version = "${{ github.ref_name }}" -replace '^v', ''
+          }
+          if (-not $version) { $version = "1.0.0" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Building version $version"
+
+      # ffmpeg/ffprobe are gitignored (too large to track), so they are fetched here into the exact
+      # location the csproj copies to the output and BundledResources looks for at runtime.
+      - name: Fetch bundled ffmpeg
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path tools/ffmpeg | Out-Null
+          Invoke-WebRequest -Uri "${{ env.FFMPEG_URL }}" -OutFile ffmpeg.zip
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg-extract -Force
+          # The archive nests everything under a versioned folder name, so find the binaries rather
+          # than hardcoding a path that changes with every ffmpeg release.
+          Get-ChildItem -Path ffmpeg-extract -Recurse -Include ffmpeg.exe,ffprobe.exe |
+            ForEach-Object { Copy-Item $_.FullName -Destination tools/ffmpeg -Force }
+          if (-not (Test-Path tools/ffmpeg/ffmpeg.exe)) { throw "ffmpeg.exe not found in archive" }
+          if (-not (Test-Path tools/ffmpeg/ffprobe.exe)) { throw "ffprobe.exe not found in archive" }
+          Get-ChildItem tools/ffmpeg
+
+      - name: Restore
+        run: dotnet restore ClippingSoftware.sln
+
+      # Warnings-as-errors is deliberately NOT set: this codebase has never been built under it, and
+      # turning it on here would fail the build on pre-existing warnings unrelated to any given change.
+      - name: Build
+        run: dotnet build ClippingSoftware.sln --configuration Release --no-restore
+
+      # Self-contained so the user never has to install a .NET runtime first - the whole point is
+      # "download Setup.exe, follow the prompts". Not single-file (see the csproj comment): the app
+      # needs assets\ and tools\ as real files beside the exe.
+      - name: Publish
+        run: >
+          dotnet publish src/ClippingSoftware.App/ClippingSoftware.App.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:Version=${{ steps.version.outputs.version }}
+          --output publish
+
+      # Catches the class of failure that is invisible until someone runs the installed copy: the app
+      # resolving assets/tools by walking *up* to the repo root works in a dev build and cannot work
+      # from Program Files, so verify they were actually copied into the published output.
+      - name: Verify published layout
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $required = @(
+            "publish/ClippingSoftware.App.exe",
+            "publish/assets/GameDatabase/known-games.json",
+            "publish/assets/Sounds/clip-saved.wav",
+            "publish/assets/Sounds/recording-started.wav",
+            "publish/Assets/tray.ico",
+            "publish/tools/ffmpeg/ffmpeg.exe",
+            "publish/tools/ffmpeg/ffprobe.exe"
+          )
+          $missing = $required | Where-Object { -not (Test-Path $_) }
+          if ($missing) {
+            throw "Published output is missing required files:`n$($missing -join "`n")"
+          }
+          Write-Host "Published layout OK ($([math]::Round((Get-ChildItem publish -Recurse | Measure-Object Length -Sum).Sum / 1MB)) MB)"
+
+      # Inno Setup ships with the windows-latest image's Chocolatey feed; installing it explicitly keeps
+      # the build reproducible rather than depending on whatever happens to be preinstalled.
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+          & $iscc `
+            "/DSourceDir=$(Resolve-Path publish)" `
+            "/DAppVersion=${{ steps.version.outputs.version }}" `
+            "/DOutputDir=$(Join-Path (Get-Location) 'dist')" `
+            installer/ClippingSoftware.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
+          Get-ChildItem dist
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClippingSoftware-Setup-${{ steps.version.outputs.version }}
+          path: dist/*.exe
+          if-no-files-found: error
+          retention-days: 90
+
+      # Only on a version tag: a downloadable release page is the "just download the setup wizard"
+      # endpoint, and cutting one per branch push would bury it.
+      - name: Publish GitHub release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe
+          generate_release_notes: true

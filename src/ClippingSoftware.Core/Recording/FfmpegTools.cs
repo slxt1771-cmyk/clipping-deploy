@@ -1,17 +1,18 @@
 namespace ClippingSoftware.Core.Recording;
 
 /// <summary>
-/// Locates the bundled static ffmpeg/ffprobe binaries. Walks up from the running app's base
-/// directory looking for a "tools\ffmpeg" folder (works no matter how deep the app's bin output
-/// is nested under the repo root), falling back to the known absolute path for this single-machine,
-/// personal-use install if the walk-up fails (e.g. when run from a scratch/test harness located
-/// entirely outside the repo tree).
+/// Locates the bundled static ffmpeg/ffprobe binaries under "tools\ffmpeg" - beside the exe in a packaged
+/// install, or at the repo root when running from a bin output folder (see <see cref="BundledResources"/>
+/// for how both layouts are resolved).
+///
+/// Resolution is deferred and cached via <see cref="Lazy{T}"/> rather than done at type-load: every ffmpeg
+/// consumer (<see cref="ThumbnailGenerator"/>, <see cref="ClipTrimmer"/>, ...) defaults its path from these
+/// properties in a field initializer, so an eager throw here would take down the whole ingest pipeline's
+/// construction instead of just the one operation that actually needed ffmpeg.
 /// </summary>
 public static class FfmpegTools
 {
-    private const string FallbackToolsDirectory = @"D:\claude stuff\clipping software\tools\ffmpeg";
-
-    private static readonly Lazy<string> ToolsDirectoryLazy = new(LocateToolsDirectory);
+    private static readonly Lazy<string> ToolsDirectoryLazy = new(() => BundledResources.Resolve("tools", "ffmpeg"));
 
     public static string ToolsDirectory => ToolsDirectoryLazy.Value;
 
@@ -19,27 +20,20 @@ public static class FfmpegTools
 
     public static string FfprobePath => Path.Combine(ToolsDirectory, "ffprobe.exe");
 
-    private static string LocateToolsDirectory()
+    /// <summary>
+    /// Whether both binaries are actually present, without throwing. The first-run setup wizard uses this
+    /// to report a broken/incomplete install up front rather than letting the user discover it later as a
+    /// failed clip ingest.
+    /// </summary>
+    public static bool AreAvailable()
     {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null)
+        try
         {
-            var candidate = Path.Combine(dir.FullName, "tools", "ffmpeg");
-            if (File.Exists(Path.Combine(candidate, "ffmpeg.exe")))
-            {
-                return candidate;
-            }
-
-            dir = dir.Parent;
+            return File.Exists(FfmpegPath) && File.Exists(FfprobePath);
         }
-
-        if (File.Exists(Path.Combine(FallbackToolsDirectory, "ffmpeg.exe")))
+        catch (FileNotFoundException)
         {
-            return FallbackToolsDirectory;
+            return false;
         }
-
-        throw new FileNotFoundException(
-            "Could not locate bundled ffmpeg/ffprobe tools directory (searched up from " +
-            $"{AppContext.BaseDirectory} and fell back to {FallbackToolsDirectory}).");
     }
 }
