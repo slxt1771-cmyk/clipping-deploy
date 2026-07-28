@@ -1,0 +1,125 @@
+<UserControl x:Class="ClippingSoftware.App.Views.TrimEditorView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:local="clr-namespace:ClippingSoftware.App.Views"
+             mc:Ignorable="d" d:DesignHeight="640" d:DesignWidth="900">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Embedded in the Clips tab now (M16, was a separate popup window) - this row replaces the old
+             window titlebar/close button with a back-to-library action plus a switcher so you can hop
+             between clips without ever leaving the editor. Reaches past this UserControl's own DataContext
+             (TrimEditorViewModel) to the hosting ClipBrowserView's DataContext (ClipBrowserViewModel) -
+             the only host this view is ever embedded in, so binding to that specific ancestor type is safe. -->
+        <DockPanel Grid.Row="0" Margin="0,0,0,12" LastChildFill="False">
+            <Button DockPanel.Dock="Left" Content="&lt; BACK TO LIBRARY" Padding="10,5"
+                    Style="{StaticResource OutlinedButtonStyle}"
+                    Command="{Binding DataContext.BackToLibraryCommand, RelativeSource={RelativeSource AncestorType=local:ClipBrowserView}}"/>
+            <TextBlock DockPanel.Dock="Left" Text="SWITCH CLIP" Style="{StaticResource EyebrowTextStyle}"
+                       VerticalAlignment="Center" Margin="20,0,8,0"/>
+            <ComboBox DockPanel.Dock="Left" Width="280" VerticalAlignment="Center"
+                      ItemsSource="{Binding DataContext.Clips, RelativeSource={RelativeSource AncestorType=local:ClipBrowserView}}"
+                      SelectedItem="{Binding DataContext.EditingClip, RelativeSource={RelativeSource AncestorType=local:ClipBrowserView}, Mode=TwoWay}"
+                      DisplayMemberPath="FileNameTag"/>
+        </DockPanel>
+
+        <Border Grid.Row="1" Background="Black" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1">
+            <MediaElement x:Name="Player" LoadedBehavior="Manual" UnloadedBehavior="Manual"
+                          Stretch="Uniform" MediaOpened="Player_MediaOpened"/>
+        </Border>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,0">
+            <Button Content="PLAY" Padding="10,5" Margin="0,0,6,0" Click="Play_Click"/>
+            <Button Content="PAUSE" Padding="10,5" Margin="0,0,6,0" Click="Pause_Click"/>
+            <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource DimBrush}" Margin="12,0,0,0"
+                       FontFamily="{StaticResource MonoFont}"
+                       Text="{Binding CurrentPositionSeconds, StringFormat='{}{0:0.0}s'}"/>
+            <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource DimBrush}"
+                       FontFamily="{StaticResource MonoFont}"
+                       Text="{Binding TotalSeconds, StringFormat='{}/ {0:0.0}s'}"/>
+        </StackPanel>
+
+        <Slider Grid.Row="3" x:Name="ScrubSlider" Minimum="0" Margin="0,6,0,0"
+                PreviewMouseDown="ScrubSlider_PreviewMouseDown"
+                PreviewMouseUp="ScrubSlider_PreviewMouseUp"/>
+
+        <Grid Grid.Row="4" Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="24"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0" Text="IN" Style="{StaticResource EyebrowTextStyle}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <TextBox Grid.Column="1" Width="70" VerticalContentAlignment="Center" FontFamily="{StaticResource MonoFont}"
+                     Text="{Binding InPointSeconds, StringFormat=0.0, UpdateSourceTrigger=PropertyChanged}"/>
+            <Button Grid.Column="2" Content="SET FROM PLAYHEAD" Padding="6,3" Margin="6,0,0,0" Click="SetIn_Click"
+                    Style="{StaticResource OutlinedButtonStyle}"/>
+
+            <TextBlock Grid.Column="4" Text="OUT" Style="{StaticResource EyebrowTextStyle}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <TextBox Grid.Column="5" Width="70" VerticalContentAlignment="Center" FontFamily="{StaticResource MonoFont}"
+                     Text="{Binding OutPointSeconds, StringFormat=0.0, UpdateSourceTrigger=PropertyChanged}"/>
+            <Button Grid.Column="6" Content="SET FROM PLAYHEAD" Padding="6,3" Margin="6,0,0,0" Click="SetOut_Click"
+                    Style="{StaticResource OutlinedButtonStyle}"/>
+        </Grid>
+
+        <!-- Per-track export selection and level (M9/M11): unchecking a track excludes it from the
+             export; the slider re-levels it (sent to ClipTrimmer as a volume filter). More than one
+             checked track gets mixed down to a single stereo track since sharing platforms only play a
+             file's first audio track anyway - see ClipTrimmer's class doc comment. Empty for clips
+             recorded before AudioTracksJson existed, in which case this whole row is blank. -->
+        <StackPanel Grid.Row="5" Orientation="Horizontal" Margin="0,10,0,0" VerticalAlignment="Top">
+            <TextBlock Text="AUDIO TRACKS" Style="{StaticResource EyebrowTextStyle}" VerticalAlignment="Top" Margin="0,4,10,0"/>
+            <ItemsControl ItemsSource="{Binding AudioTrackOptions}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal"/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Width="140" Margin="0,0,16,0">
+                            <CheckBox Content="{Binding Label}" IsChecked="{Binding IsEnabled}"
+                                      FontFamily="{StaticResource MonoFont}" FontSize="11"/>
+                            <DockPanel Margin="0,2,0,0" LastChildFill="True">
+                                <TextBlock DockPanel.Dock="Right" Width="30" TextAlignment="Right" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource DimBrush}" FontFamily="{StaticResource MonoFont}" FontSize="10"
+                                           Text="{Binding VolumePercent, Mode=OneWay, StringFormat='{}{0}%'}"/>
+                                <Slider Minimum="0" Maximum="100" Value="{Binding VolumePercent}"
+                                        IsEnabled="{Binding IsEnabled}" VerticalAlignment="Center"/>
+                            </DockPanel>
+                        </StackPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+
+        <!-- Off by default: stream-copy is the right choice for the common "grab a highlight" case.
+             This is the opt-in for when the keyframe-snapped start actually matters. -->
+        <CheckBox Grid.Row="6" Content="FRAME-ACCURATE (slower, re-encodes)" Margin="0,10,0,0"
+                  FontFamily="{StaticResource MonoFont}" FontSize="11"
+                  IsChecked="{Binding IsFrameAccurate}"/>
+
+        <DockPanel Grid.Row="7" Margin="0,10,0,0" LastChildFill="False">
+            <Button DockPanel.Dock="Left" Content="EXPORT" Padding="14,6" Command="{Binding ExportCommand}"
+                    Style="{StaticResource PrimaryButtonStyle}"/>
+            <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" Foreground="{DynamicResource TallyRedBrush}"
+                       Text="{Binding StatusMessage}" TextWrapping="Wrap" MaxWidth="400"/>
+        </DockPanel>
+    </Grid>
+</UserControl>

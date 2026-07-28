@@ -1,0 +1,255 @@
+<UserControl x:Class="ClippingSoftware.App.Views.GameProfilesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:sys="clr-namespace:System;assembly=mscorlib"
+             mc:Ignorable="d"
+             d:DesignHeight="600" d:DesignWidth="900">
+    <Grid Margin="16">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="300"/>
+            <ColumnDefinition Width="16"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- Left: profile list -->
+        <Grid Grid.Column="0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Module-ID header, matching the same convention as the Clip Library tab
+                 (CLIP-SYS // CL-001) so the app's chrome language reads as one system. -->
+            <StackPanel Grid.Row="0" Margin="0,0,0,10">
+                <TextBlock Text="GAME-SYS // GP-002" FontFamily="{StaticResource MonoFont}" FontWeight="Bold" FontSize="15"/>
+                <TextBlock Margin="0,3,0,0" Style="{StaticResource EyebrowTextStyle}">
+                    <Run Text="MODULE_ID: GAME_PROFILES"/>
+                    <Run Text="  ENTRIES: "/>
+                    <Run Text="{Binding Profiles.Count, Mode=OneWay}"/>
+                </TextBlock>
+            </StackPanel>
+
+            <DataGrid Grid.Row="1" ItemsSource="{Binding Profiles}" SelectedItem="{Binding SelectedProfile}"
+                      AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="True"
+                      SelectionMode="Single" HeadersVisibility="Column" GridLinesVisibility="Horizontal">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Name" Binding="{Binding DisplayName}" Width="*"/>
+                    <DataGridCheckBoxColumn Header="Default" Binding="{Binding IsBuiltInDefault}" Width="55"/>
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,0">
+                <Button Content="ADD" Width="70" Margin="0,0,6,0" Command="{Binding AddCommand}"
+                        Style="{StaticResource PrimaryButtonStyle}"/>
+                <Button Content="DELETE" Width="70" Margin="0,0,6,0" Command="{Binding DeleteCommand}"
+                        Style="{StaticResource DangerButtonStyle}"
+                        ToolTip="The built-in Default profile can't be deleted."/>
+                <Button Content="REFRESH" Width="70" Command="{Binding RefreshCommand}"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- Right: edit form for SelectedProfile, bound via the Edit* draft properties -->
+        <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock Text="EDIT_PROFILE" FontFamily="{StaticResource MonoFont}" FontWeight="Bold" FontSize="15" Margin="0,0,0,10"/>
+
+                <GroupBox Header="Matching" Padding="8" Margin="0,0,0,8">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Display Name" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding EditDisplayName, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Executable Match(es)" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                        <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding EditExecutableMatchesText, UpdateSourceTrigger=PropertyChanged}"
+                                 Margin="0,4" AcceptsReturn="True" TextWrapping="Wrap" Height="60"
+                                 VerticalScrollBarVisibility="Auto"
+                                 ToolTip="One executable per line (or comma-separated), e.g. eldenring.exe"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Require Fullscreen/Borderless" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <CheckBox Grid.Row="2" Grid.Column="1" IsChecked="{Binding EditRequireFullscreenOrBorderless}" Margin="0,4" VerticalAlignment="Center"/>
+                    </Grid>
+                </GroupBox>
+
+                <GroupBox Header="Capture / Audio" Padding="8" Margin="0,0,0,8">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Capture Mode" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <ComboBox Grid.Row="0" Grid.Column="1" Margin="0,4" SelectedItem="{Binding EditCaptureMode}">
+                            <sys:String>DisplayCapture</sys:String>
+                            <sys:String>WindowCapture</sys:String>
+                        </ComboBox>
+
+                        <!-- Null selection means "leave whatever's currently set on that source alone" (see
+                             GameProfile.CaptureTargetMonitorId/CaptureTargetWindow doc comments) - only the
+                             picker matching the selected mode is shown, matching MainWindow's Settings tab CAPTURE SOURCE group. -->
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Target Monitor" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding EditCaptureMode}" Value="WindowCapture">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <ComboBox Grid.Row="1" Grid.Column="1" Margin="0,4" ItemsSource="{Binding MonitorOptions}"
+                                  SelectedItem="{Binding EditCaptureTargetMonitor}">
+                            <ComboBox.Style>
+                                <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding EditCaptureMode}" Value="WindowCapture">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ComboBox.Style>
+                        </ComboBox>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Target Window" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding EditCaptureMode}" Value="WindowCapture">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <ComboBox Grid.Row="2" Grid.Column="1" Margin="0,4" ItemsSource="{Binding WindowOptions}"
+                                  SelectedItem="{Binding EditCaptureTargetWindow}">
+                            <ComboBox.Style>
+                                <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding EditCaptureMode}" Value="WindowCapture">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ComboBox.Style>
+                        </ComboBox>
+
+                        <Button Grid.Row="3" Grid.Column="1" Content="REFRESH" Padding="6,3" Margin="0,4"
+                                HorizontalAlignment="Left" Command="{Binding RefreshCaptureOptionsCommand}"
+                                Style="{StaticResource OutlinedButtonStyle}"
+                                ToolTip="Reload the monitor/window lists from OBS (requires an active connection)."/>
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Mic Enabled" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <CheckBox Grid.Row="4" Grid.Column="1" IsChecked="{Binding EditMicEnabled}" Margin="0,4" VerticalAlignment="Center"/>
+
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Desktop Audio Enabled" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <CheckBox Grid.Row="5" Grid.Column="1" IsChecked="{Binding EditDesktopAudioEnabled}" Margin="0,4" VerticalAlignment="Center"/>
+                    </Grid>
+                </GroupBox>
+
+                <GroupBox Header="Video" Padding="8" Margin="0,0,0,8">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Output Width" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding EditOutputWidth, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Output Height" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding EditOutputHeight, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Fps" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding EditFps, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="OBS Profile Name" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <DockPanel Grid.Row="3" Grid.Column="1" Margin="0,4">
+                            <Button DockPanel.Dock="Right" Content="REFRESH" Padding="6,3" Margin="6,0,0,0"
+                                    Command="{Binding RefreshObsProfilesCommand}"
+                                    ToolTip="Reload the profile list from OBS (requires an active connection)."/>
+                            <!-- Editable so a free-typed name still works when OBS isn't connected or the
+                                 live list is empty/stale - see ObsProfileNameOptions' doc comment. -->
+                            <ComboBox IsEditable="True" ItemsSource="{Binding ObsProfileNameOptions}"
+                                      Text="{Binding EditObsProfileName, UpdateSourceTrigger=PropertyChanged}"/>
+                        </DockPanel>
+                    </Grid>
+                </GroupBox>
+
+                <GroupBox Header="Encoder (NVENC)" Padding="8" Margin="0,0,0,8">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Codec" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding EditCodec, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Rate Control" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding EditRateControl, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="CQ Level" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding EditCqLevel, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Preset" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding EditPreset, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Tuning" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding EditTuning, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Multipass" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding EditMultipass, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+
+                        <TextBlock Grid.Row="6" Grid.Column="0" Text="Keyframe Interval (sec)" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding EditKeyframeIntervalSec, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+                    </Grid>
+                </GroupBox>
+
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,16">
+                    <Button Content="SAVE" Width="100" Command="{Binding SaveCommand}" Style="{StaticResource PrimaryButtonStyle}"/>
+                    <TextBlock Text="{Binding StatusMessage}" Margin="12,0,0,0" Foreground="{DynamicResource TallyRedBrush}" VerticalAlignment="Center"/>
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

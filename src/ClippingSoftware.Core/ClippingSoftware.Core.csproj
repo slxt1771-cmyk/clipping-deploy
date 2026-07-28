@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\ClippingSoftware.Shared\ClippingSoftware.Shared.csproj" />
+    <ProjectReference Include="..\ClippingSoftware.Data\ClippingSoftware.Data.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="obs-websocket-dotnet" Version="5.0.1" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Needed for System.Windows.Interop.HwndSource, used by GlobalHotkeyService to hook the
+         WPF window's message pump for WM_HOTKEY without pulling WPF into every consumer manually. -->
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+  <!-- UseWPF switches the SDK's implicit-usings set away from the plain Microsoft.NET.Sdk list
+       (which includes System.IO) to the WPF-flavored one (which doesn't). Re-add it explicitly so
+       existing files using File/Path/Directory/etc. without an explicit "using System.IO;" keep
+       compiling. -->
+  <ItemGroup>
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+</Project>

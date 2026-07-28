@@ -1,0 +1,552 @@
+<Window x:Class="ClippingSoftware.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:ClippingSoftware.App"
+        xmlns:views="clr-namespace:ClippingSoftware.App.Views"
+        xmlns:controls="clr-namespace:ClippingSoftware.App.Controls"
+        xmlns:converters="clr-namespace:ClippingSoftware.App.Converters"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        mc:Ignorable="d"
+        Title="Clipping Software" Height="720" Width="1100">
+        <!-- Custom titlebar (M15): the old native white Windows caption bar is gone, replaced by the
+             app's own dark strip below (TitleBarRow) so LIVE/BUFFER/GAME status live in the same visual
+             system as the rest of the app instead of sitting under a separate OS-chrome bar - the VS
+             Code approach. CaptionHeight must match TitleBarRow's actual Height (40) so the whole strip
+             stays natively draggable/double-click-to-maximize; only the caption buttons and anything
+             else truly interactive inside it are carved out via WindowChrome.IsHitTestVisibleInChrome.
+             GlassFrameThickness="0,0,0,1" (not all-zero) is the standard trick to keep DWM's normal
+             drop-shadow around the window edges instead of going fully flat/shadowless. ResizeBorderThickness
+             restores a comfortable resize-grab margin that WindowChrome otherwise removes. See
+             MainWindow.xaml.cs's WM_GETMINMAXINFO hook for the maximized-bounds fix this setup needs. -->
+        <WindowChrome.WindowChrome>
+            <WindowChrome CaptionHeight="40" CornerRadius="0" GlassFrameThickness="0,0,0,1"
+                          ResizeBorderThickness="6" UseAeroCaptionButtons="False"/>
+        </WindowChrome.WindowChrome>
+    <Window.Resources>
+        <converters:HexToBrushConverter x:Key="HexToBrushConverter"/>
+
+        <!-- Tally lamp: priority is Recording > Connected > Standby, matching a vision-switcher's
+             on-air/preview/standby convention. Declared here (not in Theme.xaml) since it binds
+             straight to MainViewModel - Theme.xaml stays view-model-agnostic. Standby uses the
+             neutral Dim tone rather than a third accent color - the palette only spends color on
+             Tertiary (live) and Alert (recording), per the design system's restraint. -->
+        <Style x:Key="TallyLampStyle" TargetType="Ellipse">
+            <Setter Property="Fill" Value="{DynamicResource DimBrush}"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                    <Setter Property="Fill" Value="{DynamicResource TertiaryBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsRecording}" Value="True">
+                    <Setter Property="Fill" Value="{DynamicResource TallyRedBrush}"/>
+                    <DataTrigger.EnterActions>
+                        <BeginStoryboard x:Name="PulseStoryboard">
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                  From="1.0" To="0.35" Duration="0:0:0.7"
+                                                  AutoReverse="True" RepeatBehavior="Forever"/>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </DataTrigger.EnterActions>
+                    <DataTrigger.ExitActions>
+                        <StopStoryboard BeginStoryboardName="PulseStoryboard"/>
+                    </DataTrigger.ExitActions>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="TallyLabelTextStyle" TargetType="TextBlock" BasedOn="{StaticResource EyebrowTextStyle}">
+            <Setter Property="Text" Value="STANDBY"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                    <Setter Property="Text" Value="LIVE"/>
+                    <Setter Property="Foreground" Value="{DynamicResource TertiaryBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsRecording}" Value="True">
+                    <Setter Property="Text" Value="REC"/>
+                    <Setter Property="Foreground" Value="{DynamicResource TallyRedBrush}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Second, independent lamp (M10): recording and the replay buffer are two separate OBS outputs
+             that can each be active on their own (buffer runs continuously in the background, recording is
+             a separate on/off action) - splitting them into two lamps says so instead of the single tally
+             lamp implying they're the same state. -->
+        <Style x:Key="BufferLampStyle" TargetType="Ellipse">
+            <Setter Property="Fill" Value="{DynamicResource DimBrush}"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsReplayBufferActive}" Value="True">
+                    <Setter Property="Fill" Value="{DynamicResource TertiaryBrush}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="BufferLabelTextStyle" TargetType="TextBlock" BasedOn="{StaticResource EyebrowTextStyle}">
+            <Setter Property="Text" Value="BUFFER OFF"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsReplayBufferActive}" Value="True">
+                    <Setter Property="Text" Value="BUFFER ON"/>
+                    <Setter Property="Foreground" Value="{DynamicResource TertiaryBrush}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <!-- WindowChrome's known quirk: a maximized custom-chrome window's actual HWND rect still overhangs
+         the work area by SystemParameters.WindowResizeBorderThickness (measured at exactly 8px on this
+         setup) even with the WM_GETMINMAXINFO fix in MainWindow.xaml.cs applied - that hook corrects the
+         logical max size WPF computes, but the rendered window still ends up padded outward by the
+         resize-border margin WindowChrome reserves for the invisible resize grab zone. Pulling the whole
+         app content in by that same amount only while maximized is the standard companion fix; Margin is
+         0 (no-op) in normal/restored state so windowed resizing is unaffected. -->
+    <Grid>
+        <Grid.Style>
+            <Style TargetType="Grid">
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding WindowState, RelativeSource={RelativeSource AncestorType=Window}}" Value="Maximized">
+                        <Setter Property="Margin" Value="8"/>
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </Grid.Style>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Custom titlebar (M15): replaces the native Windows caption bar entirely - the LIVE/BUFFER/
+             GAME status strip and the app's own drag/minimize/maximize/close chrome now live in one
+             row instead of a status strip sitting underneath a separate white OS bar. Height must equal
+             WindowChrome's CaptionHeight (40, set above) so the whole row stays natively draggable and
+             double-click-to-maximize keeps working; only the caption buttons carve themselves out via
+             WindowChrome.IsHitTestVisibleInChrome since they need real clicks, not a drag. -->
+        <Border Grid.Row="0" Height="40" Background="{DynamicResource InkBrush}" BorderBrush="{DynamicResource HairlineBrush}"
+                BorderThickness="0,0,0,1">
+            <DockPanel LastChildFill="False">
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="CLIP-SYS // CTRL-DECK" Style="{StaticResource EyebrowTextStyle}" FontWeight="Bold" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Margin="24,0,0,0" VerticalAlignment="Center">
+                    <Ellipse Width="10" Height="10" Style="{StaticResource TallyLampStyle}"/>
+                    <TextBlock Style="{StaticResource TallyLabelTextStyle}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Margin="20,0,0,0" VerticalAlignment="Center">
+                    <Ellipse Width="10" Height="10" Style="{StaticResource BufferLampStyle}"/>
+                    <TextBlock Style="{StaticResource BufferLabelTextStyle}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Margin="20,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="GAME" Style="{StaticResource EyebrowTextStyle}" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding DetectedGameName}" Margin="8,0,0,0" VerticalAlignment="Center"
+                               FontFamily="{StaticResource MonoFont}" FontSize="12"/>
+                </StackPanel>
+
+                <!-- Global status line (StatusMessage is written to from every tab's actions - connect,
+                     record, capture-source changes, settings save, etc.) - lives here instead of on one
+                     tab's own row now that it's genuinely app-wide, not just a Capture-tab concern. -->
+                <TextBlock DockPanel.Dock="Left" Text="{Binding StatusMessage}" Margin="20,0,0,0" VerticalAlignment="Center"
+                           MaxWidth="320" TextTrimming="CharacterEllipsis" ToolTip="{Binding StatusMessage}"
+                           FontFamily="{StaticResource MonoFont}" FontSize="11" Foreground="{DynamicResource DimBrush}"/>
+
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" WindowChrome.IsHitTestVisibleInChrome="True">
+                    <Button Style="{StaticResource TitleBarButtonStyle}" Click="Minimize_Click" ToolTip="Minimize">
+                        <Path Width="10" Height="10" Stretch="Uniform" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1.3"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M0,5 L10,5"/>
+                    </Button>
+                    <Button Style="{StaticResource TitleBarButtonStyle}" Click="MaximizeRestore_Click" ToolTip="Maximize/Restore">
+                        <Path Width="10" Height="10" Stretch="Uniform" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1.3"
+                              Data="M0.5,0.5 L9.5,0.5 L9.5,9.5 L0.5,9.5 Z"/>
+                    </Button>
+                    <Button Style="{StaticResource TitleBarCloseButtonStyle}" Click="Close_Click" ToolTip="Close">
+                        <Path Width="10" Height="10" Stretch="Uniform" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1.3"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M0,0 L10,10 M10,0 L0,10"/>
+                    </Button>
+                </StackPanel>
+
+                <!-- Primary transport actions (moved off the Capture tab, which no longer exists as a
+                     separate tab - see the Settings TabItem below) - always reachable from any tab, same
+                     reasoning as the LIVE/BUFFER lamps living here: start/stop recording isn't tied to one
+                     page, it's a global action. Docked Right *after* the caption-button StackPanel above
+                     (DockPanel with LastChildFill="False" docks children in document order, consuming the
+                     remaining rect from whichever side each one specifies - the last Right child docked
+                     ends up innermost, so this one has to come second to land left of Minimize/Maximize/
+                     Close rather than pushing them out to the far edge). -->
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,8,0" VerticalAlignment="Center"
+                            WindowChrome.IsHitTestVisibleInChrome="True">
+                    <Button Content="START RECORDING" Command="{Binding StartRecordCommand}" Padding="10,4"
+                            Style="{StaticResource PrimaryButtonStyle}"/>
+                    <Button Content="STOP RECORDING" Command="{Binding StopRecordCommand}" Padding="10,4" Margin="6,0,0,0"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Clips is the default view (M15/M16) - it's what you actually check most; Settings (formerly
+             two tabs, Capture and Settings - merged into one, since splitting "capture mechanics" from
+             "everything else" read as an arbitrary line once both were this size) is set-once-and-forget
+             config, so it stays second. -->
+        <TabControl Grid.Row="1" SelectedIndex="0">
+        <TabItem>
+            <TabItem.Header>
+                <StackPanel Orientation="Vertical" HorizontalAlignment="Center" Margin="4">
+                    <Path Data="M0,0 L0,12 L10,6 Z" Width="10" Height="12" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,4"
+                          Fill="{Binding RelativeSource={RelativeSource AncestorType=TabItem}, Path=Foreground}"/>
+                    <TextBlock Text="CLIPS" HorizontalAlignment="Center"/>
+                </StackPanel>
+            </TabItem.Header>
+            <views:ClipBrowserView DataContext="{Binding ClipBrowser}"/>
+        </TabItem>
+
+        <TabItem>
+            <TabItem.Header>
+                <StackPanel Orientation="Vertical" HorizontalAlignment="Center" Margin="4">
+                    <Canvas Width="14" Height="12" HorizontalAlignment="Center" Margin="0,0,0,4">
+                        <Path Data="M1,2 L13,2 M1,7 L13,7 M1,12 L9,12"
+                              Stroke="{Binding RelativeSource={RelativeSource AncestorType=TabItem}, Path=Foreground}" StrokeThickness="1.3"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                        <Ellipse Width="3" Height="3" Canvas.Left="10.5" Canvas.Top="10.5"
+                                 Fill="{Binding RelativeSource={RelativeSource AncestorType=TabItem}, Path=Foreground}"/>
+                    </Canvas>
+                    <TextBlock Text="SETTINGS" HorizontalAlignment="Center"/>
+                </StackPanel>
+            </TabItem.Header>
+            <!-- Capture and Settings used to be two tabs; merged into one now that Start/Stop Recording
+                 lives in the title bar (always reachable regardless of tab) and Connect moved down into
+                 the CONNECTION group below as a proper action button instead of floating in its own row.
+                 Same Auto/* row shape the old Capture tab used - a bounded ScrollViewer up top for the
+                 six uniform-width (340px) config groups, Game Profiles given the remaining window height
+                 below rather than living inside the same ScrollViewer (its DataGrid needs a bounded
+                 height to size against; a Grid's "*" row inside an infinite-height ScrollViewer collapses
+                 to zero, so it has to sit in its own un-scrolled row like this, not stacked into the
+                 StackPanel above). -->
+            <Grid Margin="24">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <ScrollViewer Grid.Row="0" MaxHeight="440" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                <WrapPanel Orientation="Horizontal">
+                    <GroupBox Header="CONNECTION" Padding="8" Margin="0,0,16,16" VerticalAlignment="Top" Width="340">
+                        <StackPanel>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="110"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="OBS Host" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding ObsHost, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="OBS Port" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ObsPort, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="OBS Password" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding ObsPassword, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+                        </Grid>
+
+                        <!-- CONNECT used to float in its own row above the Capture/Settings split, next to
+                             Start/Stop Recording - orphaned once those moved to the title bar. It belongs
+                             with the host/port/password it actually connects, so it's the one action
+                             button in this group, same centered convention as CAPTURE SOURCE's REFRESH
+                             below. -->
+                        <Button Content="CONNECT" Command="{Binding ConnectCommand}" Width="120"
+                                HorizontalAlignment="Center" Margin="0,10,0,0" Style="{StaticResource PrimaryButtonStyle}"/>
+                        </StackPanel>
+                    </GroupBox>
+
+                    <!-- Global capture source picker (M7): which of Display Capture / Window Capture is
+                         the live scene item, and which monitor/window it targets. Mirrored per-profile
+                         below in Game Profiles - a profile's saved target overrides this when that game
+                         is detected, but this is what's live otherwise / at startup. -->
+                    <GroupBox Header="CAPTURE SOURCE" Padding="8" Margin="0,0,16,16" VerticalAlignment="Top" Width="340">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,10">
+                                <RadioButton Content="DISPLAY" GroupName="CaptureMode" VerticalAlignment="Center">
+                                    <RadioButton.Style>
+                                        <Style TargetType="RadioButton" BasedOn="{StaticResource {x:Type RadioButton}}">
+                                            <Setter Property="IsChecked" Value="True"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsWindowCaptureMode}" Value="True">
+                                                    <Setter Property="IsChecked" Value="False"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </RadioButton.Style>
+                                </RadioButton>
+                                <RadioButton Content="WINDOW" GroupName="CaptureMode" Margin="16,0,0,0" VerticalAlignment="Center"
+                                             IsChecked="{Binding IsWindowCaptureMode}"/>
+                            </StackPanel>
+
+                            <TextBlock Text="MONITOR" HorizontalAlignment="Center" Margin="0,0,0,4">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource EyebrowTextStyle}">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsWindowCaptureMode}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <ComboBox ItemsSource="{Binding MonitorOptions}" SelectedItem="{Binding SelectedMonitorOption}" Margin="0,0,0,10">
+                                <ComboBox.Style>
+                                    <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsWindowCaptureMode}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ComboBox.Style>
+                            </ComboBox>
+
+                            <TextBlock Text="WINDOW" HorizontalAlignment="Center" Margin="0,0,0,4">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource EyebrowTextStyle}">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsWindowCaptureMode}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <ComboBox ItemsSource="{Binding WindowOptions}" SelectedItem="{Binding SelectedWindowOption}" Margin="0,0,0,10">
+                                <ComboBox.Style>
+                                    <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsWindowCaptureMode}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ComboBox.Style>
+                            </ComboBox>
+
+                            <Button Content="REFRESH" Command="{Binding RefreshCaptureOptionsCommand}"
+                                    Style="{StaticResource OutlinedButtonStyle}" Padding="10,4" HorizontalAlignment="Center"
+                                    ToolTip="Reload the monitor/window lists from OBS (requires an active connection)."/>
+                        </StackPanel>
+                    </GroupBox>
+
+                    <!-- Per-app audio isolation (M8): the two permanent built-ins plus up to 4 per-app
+                         sources, each routed to its own OBS output track - see AudioSourceManager. -->
+                    <GroupBox Header="AUDIO SOURCES" Padding="8" Margin="0,0,16,16" VerticalAlignment="Top" Width="340">
+                        <StackPanel>
+                            <!-- Quick actions (M12): one-click "just the game" vs "everything but the
+                                 game" - both just flip AudioSources' IsMuted rows, so they're instant,
+                                 not a re-record. -->
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,10">
+                                <Button Content="GAME ONLY" Command="{Binding SetGameOnlyAudioCommand}"
+                                        Style="{StaticResource OutlinedButtonStyle}" Padding="10,4" Margin="0,0,8,0"/>
+                                <Button Content="ALL EXCEPT GAME" Command="{Binding SetAllExceptGameAudioCommand}"
+                                        Style="{StaticResource OutlinedButtonStyle}" Padding="10,4"/>
+                            </StackPanel>
+
+                            <ItemsControl ItemsSource="{Binding AudioSources}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="0,0,0,10">
+                                            <DockPanel LastChildFill="True">
+                                                <Button DockPanel.Dock="Right" ToolTip="Remove"
+                                                        Command="{Binding DataContext.RemoveAudioSourceCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}">
+                                                    <Button.Style>
+                                                        <Style TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsBuiltIn}" Value="True">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Button.Style>
+                                                    <Path Width="12" Height="14" Stretch="Uniform" Stroke="{DynamicResource TallyRedBrush}" StrokeThickness="1.3"
+                                                          StrokeLineJoin="Round"
+                                                          Data="M1,4 L13,4 M5,4 L5,1.5 L9,1.5 L9,4 M3,4 L3,14 L11,14 L11,4 M5.5,7 L5.5,11 M8.5,7 L8.5,11"/>
+                                                </Button>
+                                                <CheckBox DockPanel.Dock="Left" Content="MUTE" IsChecked="{Binding IsMuted}"
+                                                          Margin="0,0,10,0" VerticalAlignment="Center"/>
+                                                <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                                                    <Run Text="{Binding DisplayLabel, Mode=OneWay}"/>
+                                                    <Run Text=" · " Foreground="{DynamicResource DimBrush}"/>
+                                                    <Run Text="{Binding TrackNumber, Mode=OneWay, StringFormat='TRACK {0}'}" Foreground="{DynamicResource DimBrush}"/>
+                                                </TextBlock>
+                                            </DockPanel>
+                                            <DockPanel Margin="0,3,0,0" LastChildFill="True">
+                                                <TextBlock DockPanel.Dock="Right" Width="34" TextAlignment="Right" VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource DimBrush}" FontFamily="{StaticResource MonoFont}" FontSize="11"
+                                                           Text="{Binding VolumePercent, Mode=OneWay, StringFormat='{}{0}%'}"/>
+                                                <Slider Minimum="0" Maximum="100" Value="{Binding VolumePercent}" VerticalAlignment="Center"/>
+                                            </DockPanel>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <TextBlock Style="{StaticResource EyebrowTextStyle}" HorizontalAlignment="Center" Margin="0,4,0,10"
+                                       Text="{Binding AudioSources.Count, StringFormat='{}{0}/6 TRACKS'}"/>
+
+                            <DockPanel LastChildFill="True">
+                                <Button DockPanel.Dock="Right" Content="ADD" Command="{Binding AddAppAudioSourceCommand}"
+                                        Style="{StaticResource OutlinedButtonStyle}" Padding="10,4" Margin="6,0,0,0"/>
+                                <ComboBox ItemsSource="{Binding WindowOptions}" SelectedItem="{Binding SelectedAppAudioOption}"/>
+                            </DockPanel>
+                        </StackPanel>
+                    </GroupBox>
+
+                    <GroupBox Header="STORAGE &amp; HOTKEYS" Padding="8" Margin="0,0,16,16" VerticalAlignment="Top" Width="340">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="110"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Clip Folder" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding ClipStorageFolder, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Save Replay" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <controls:HotkeyCaptureBox Grid.Row="1" Grid.Column="1" HorizontalAlignment="Left" Margin="0,4"
+                                                        VirtualKey="{Binding ReplayBufferSaveHotkeyVk, Mode=TwoWay}"
+                                                        Modifiers="{Binding ReplayBufferSaveHotkeyModifiers, Mode=TwoWay}"/>
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Start/Stop Rec" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <controls:HotkeyCaptureBox Grid.Row="2" Grid.Column="1" HorizontalAlignment="Left" Margin="0,4"
+                                                        VirtualKey="{Binding StartStopRecordingHotkeyVk, Mode=TwoWay}"
+                                                        Modifiers="{Binding StartStopRecordingHotkeyModifiers, Mode=TwoWay}"/>
+                        </Grid>
+                    </GroupBox>
+
+                    <!-- Test buttons next to each toggle play the cue immediately at the current volume,
+                         so picking/checking a sound doesn't require waiting for a real recording-start or
+                         clip-save event. -->
+                    <GroupBox Header="SOUND CUES" Padding="8" Margin="0,0,16,16" VerticalAlignment="Top" Width="340">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <DockPanel Grid.Column="0" LastChildFill="False">
+                                    <CheckBox DockPanel.Dock="Left" Content="Clip saved" IsChecked="{Binding PlayClipSavedSound}" VerticalAlignment="Center"/>
+                                    <Button DockPanel.Dock="Left" Content="TEST" Padding="6,2" Margin="8,0,0,0"
+                                            Style="{StaticResource OutlinedButtonStyle}" Command="{Binding PreviewClipSavedSoundCommand}"/>
+                                </DockPanel>
+                                <DockPanel Grid.Column="1" LastChildFill="False">
+                                    <CheckBox DockPanel.Dock="Left" Content="Recording started" IsChecked="{Binding PlayRecordingStartedSound}" VerticalAlignment="Center"/>
+                                    <Button DockPanel.Dock="Left" Content="TEST" Padding="6,2" Margin="8,0,0,0"
+                                            Style="{StaticResource OutlinedButtonStyle}" Command="{Binding PreviewRecordingStartedSoundCommand}"/>
+                                </DockPanel>
+                            </Grid>
+
+                            <TextBlock Text="VOLUME" Style="{StaticResource EyebrowTextStyle}" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                            <DockPanel LastChildFill="True">
+                                <TextBlock DockPanel.Dock="Right" Width="34" TextAlignment="Right" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource DimBrush}" FontFamily="{StaticResource MonoFont}" FontSize="11"
+                                           Text="{Binding SoundCueVolumePercent, Mode=OneWay, StringFormat='{}{0}%'}"/>
+                                <Slider Minimum="0" Maximum="100" Value="{Binding SoundCueVolumePercent}" VerticalAlignment="Center"/>
+                            </DockPanel>
+                        </StackPanel>
+                    </GroupBox>
+
+                    <!-- 4-color theme: Primary is the main background, Secondary the panel/sidebar
+                         background, Tertiary drives body text + lines + the selection/live/hover signal
+                         together (one color, tinted/shaded into each role - see ThemeManager), Quaternary
+                         is the alert/destructive color (delete icons, recording indicator). Editing any one
+                         re-themes the whole app instantly via APPLY; everything here is one consistent,
+                         swappable pattern rather than 4 unrelated pickers. -->
+                    <GroupBox Header="APPEARANCE" Padding="8" Margin="0,0,16,16" VerticalAlignment="Top" Width="340">
+                        <StackPanel>
+                            <TextBlock Text="PRIMARY (BACKGROUND)" Style="{StaticResource EyebrowTextStyle}" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                            <DockPanel Margin="0,0,0,10" LastChildFill="True">
+                                <Border DockPanel.Dock="Left" Width="26" Height="26" Margin="0,0,8,0"
+                                        BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1"
+                                        Background="{Binding PrimaryColorHex, Converter={StaticResource HexToBrushConverter}}"/>
+                                <TextBox Text="{Binding PrimaryColorHex, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource MonoFont}"/>
+                            </DockPanel>
+
+                            <TextBlock Text="SECONDARY (PANELS)" Style="{StaticResource EyebrowTextStyle}" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                            <DockPanel Margin="0,0,0,10" LastChildFill="True">
+                                <Border DockPanel.Dock="Left" Width="26" Height="26" Margin="0,0,8,0"
+                                        BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1"
+                                        Background="{Binding SecondaryColorHex, Converter={StaticResource HexToBrushConverter}}"/>
+                                <TextBox Text="{Binding SecondaryColorHex, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource MonoFont}"/>
+                            </DockPanel>
+
+                            <TextBlock Text="TERTIARY (TEXT / LINES)" Style="{StaticResource EyebrowTextStyle}" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                            <DockPanel Margin="0,0,0,10" LastChildFill="True">
+                                <Border DockPanel.Dock="Left" Width="26" Height="26" Margin="0,0,8,0"
+                                        BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1"
+                                        Background="{Binding TertiaryColorHex, Converter={StaticResource HexToBrushConverter}}"/>
+                                <TextBox Text="{Binding TertiaryColorHex, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource MonoFont}"/>
+                            </DockPanel>
+
+                            <TextBlock Text="QUATERNARY (ALERT)" Style="{StaticResource EyebrowTextStyle}" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                            <DockPanel Margin="0,0,0,14" LastChildFill="True">
+                                <Border DockPanel.Dock="Left" Width="26" Height="26" Margin="0,0,8,0"
+                                        BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1"
+                                        Background="{Binding QuaternaryColorHex, Converter={StaticResource HexToBrushConverter}}"/>
+                                <TextBox Text="{Binding QuaternaryColorHex, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource MonoFont}"/>
+                            </DockPanel>
+
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                <Button Content="APPLY" Command="{Binding ApplyColorsCommand}"
+                                        Style="{StaticResource PrimaryButtonStyle}" Padding="10,4" Margin="0,0,8,0"/>
+                                <Button Content="RESET" Command="{Binding ResetColorsCommand}"
+                                        Style="{StaticResource OutlinedButtonStyle}" Padding="10,4"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </GroupBox>
+                </WrapPanel>
+
+                <Button Content="SAVE SETTINGS" Command="{Binding SaveSettingsCommand}"
+                        HorizontalAlignment="Left" Width="160" Margin="0,0,0,16" Style="{StaticResource PrimaryButtonStyle}"/>
+                </StackPanel>
+                </ScrollViewer>
+
+                <!-- Game profile management: a profile's saved capture/audio overrides are exactly what's
+                     live when that game is detected, so it stays with the rest of this page's config
+                     rather than needing a tab of its own. Given the remaining window height (Grid.Row="1",
+                     not inside the ScrollViewer above) so its DataGrid has a bounded height to size
+                     against - see this Grid's row-shape comment above. -->
+                <views:GameProfilesView Grid.Row="1" DataContext="{Binding GameProfiles}" Margin="0,16,0,0"/>
+            </Grid>
+        </TabItem>
+        </TabControl>
+
+        <!-- QUIT: bottom of the left nav rail, overlaid on the same row as the TabControl above (Grid
+             children stack in declaration order, so this one draws on top of the rail's own DeckBrush
+             background rather than needing to live inside the TabControl's ControlTemplate - see
+             QuitRailButtonStyle's comment in Theme.xaml). Width matches the rail's own TabPanel Width="72"
+             so it reads as part of it. The titlebar X now minimizes to tray instead of exiting (see
+             MainWindow.xaml.cs's Closing handler) - this is the one control that actually ends the app,
+             which is why it gets a confirmation (Quit_Click) that the X intentionally no longer has. -->
+        <Button Grid.Row="1" Click="Quit_Click" Style="{StaticResource QuitRailButtonStyle}"
+                HorizontalAlignment="Left" VerticalAlignment="Bottom" Width="72" ToolTip="Exit the application">
+            <StackPanel Orientation="Vertical" HorizontalAlignment="Center" Margin="4">
+                <Path Data="M6,1 L6,6.5 M2,3.3 A5,5 0 1 0 10,3.3" Width="12" Height="12" Stretch="Uniform"
+                      HorizontalAlignment="Center" Margin="0,0,0,4"
+                      Stroke="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}"
+                      StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                <TextBlock Text="QUIT" HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Button>
+    </Grid>
+</Window>

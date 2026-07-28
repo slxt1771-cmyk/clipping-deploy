@@ -1,0 +1,542 @@
+<UserControl x:Class="ClippingSoftware.App.Views.ClipBrowserView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:converters="clr-namespace:ClippingSoftware.App.Converters"
+             xmlns:vm="clr-namespace:ClippingSoftware.App.ViewModels"
+             xmlns:views="clr-namespace:ClippingSoftware.App.Views"
+             mc:Ignorable="d"
+             d:DesignHeight="500" d:DesignWidth="800">
+
+    <UserControl.Resources>
+        <converters:ThumbnailPathToImageConverter x:Key="ThumbnailPathToImageConverter"/>
+        <converters:HexToBrushConverter x:Key="HexToBrushConverter"/>
+
+        <DataTemplate x:Key="ClipTileTemplate" DataType="{x:Type vm:ClipItemViewModel}">
+            <!-- Tag carries the outer ClipBrowserViewModel down to the ContextMenu below: a ContextMenu
+                 is rendered in a separate Popup visual tree, so "RelativeSource AncestorType=UserControl"
+                 cannot walk up to it from inside the popup. Routing through PlacementTarget.Tag is the
+                 standard WPF workaround for reaching an ancestor's DataContext from a context menu. -->
+            <Border Width="220" Height="212" Margin="8" Padding="0"
+                    Background="{DynamicResource DeckBrush}" BorderThickness="1"
+                    Tag="{Binding RelativeSource={RelativeSource AncestorType=UserControl}, Path=DataContext}">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}"/>
+                        <Style.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="BorderBrush" Value="{DynamicResource TertiaryBrush}"/>
+                            </Trigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <Border.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Open in Explorer"
+                                  Command="{Binding PlacementTarget.Tag.OpenInExplorerCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                        <MenuItem Header="Open in Trim Editor"
+                                  Command="{Binding PlacementTarget.Tag.OpenInTrimEditorCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                        <Separator/>
+                        <MenuItem Header="Delete"
+                                  Command="{Binding PlacementTarget.Tag.DeleteCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                    </ContextMenu>
+                </Border.ContextMenu>
+
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="124"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Thumbnail area: placeholder always present underneath; the Image draws over it when a
+                         thumbnail exists, and stays transparent (source null) when it doesn't, so a
+                         missing/not-yet-generated thumbnail degrades gracefully instead of crashing. -->
+                    <Grid Grid.Row="0" ClipToBounds="True">
+                        <Border Background="{DynamicResource InkBrush}">
+                            <TextBlock Text="NO_PREVIEW" Foreground="{DynamicResource DimBrush}" FontSize="11"
+                                       FontFamily="{StaticResource MonoFont}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <Image Stretch="UniformToFill"
+                               Source="{Binding ThumbnailPath, Converter={StaticResource ThumbnailPathToImageConverter}}"/>
+
+                        <!-- Duration overlay, bottom-right of the thumbnail: monospace, like a timecode burn-in -->
+                        <Border Background="#C0000000" Padding="4,1"
+                                HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,4,4">
+                            <TextBlock Text="{Binding DurationText}" Foreground="{DynamicResource PaperBrush}"
+                                       FontFamily="{StaticResource MonoFont}" FontSize="11"/>
+                        </Border>
+
+                        <!-- Tag chip, top-left of the thumbnail: real metadata only (resolution tier //
+                             capture source) - no fabricated FPS/likes/shares. -->
+                        <Border Background="#C0000000" Padding="4,1"
+                                HorizontalAlignment="Left" VerticalAlignment="Top" Margin="4,4,0,0">
+                            <TextBlock FontFamily="{StaticResource MonoFont}" Foreground="{DynamicResource TertiaryBrush}" FontSize="10" FontWeight="Bold">
+                                <Run Text="{Binding ResolutionTag, Mode=OneWay}"/>
+                                <Run Text=" // "/>
+                                <Run Text="{Binding SourceLabel, Mode=OneWay}"/>
+                            </TextBlock>
+                        </Border>
+                    </Grid>
+
+                    <!-- Info panel -->
+                    <Grid Grid.Row="1" Margin="8,6,8,4">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" FontFamily="{StaticResource MonoFont}" FontWeight="Bold" FontSize="11"
+                                   TextTrimming="CharacterEllipsis" ToolTip="{Binding FilePath}">
+                            <Run Text="{Binding FileNameTag, Mode=OneWay}"/>
+                        </TextBlock>
+                        <TextBlock Grid.Row="1" FontSize="11" Foreground="{DynamicResource DimBrush}"
+                                   ToolTip="{Binding RecordedAtText}" Margin="0,3,0,0">
+                            <Run Text="{Binding GameDisplayName, Mode=OneWay}"/>
+                            <Run Text=" · "/>
+                            <Run Text="{Binding RecordedAgoText, Mode=OneWay}"/>
+                        </TextBlock>
+
+                        <!-- Assigned tag chips (read-only here - assignment happens in the TAGS manager
+                             view). Wraps below the game/timestamp line; empty for an untagged clip. -->
+                        <ItemsControl Grid.Row="2" ItemsSource="{Binding Tags}" Margin="0,4,0,0">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel Orientation="Horizontal"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="{Binding ColorHex, Converter={StaticResource HexToBrushConverter}}"
+                                            Padding="4,1" Margin="0,0,4,3">
+                                        <TextBlock Text="{Binding Name}" FontSize="9" FontFamily="{StaticResource MonoFont}"
+                                                   Foreground="{StaticResource SecondaryBrush}"/>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <!-- Icon-only action row (folder / trim / delete), tooltip-labeled - matches the
+                             component kit's "pencil icon-only" pattern rather than text buttons. -->
+                        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,4,0,0">
+                            <Button Style="{StaticResource IconButtonStyle}" ToolTip="Open in Explorer"
+                                    Command="{Binding DataContext.OpenInExplorerCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}">
+                                <Path Width="14" Height="12" Stretch="Uniform" Stroke="{DynamicResource PaperBrush}" StrokeThickness="1.3"
+                                      StrokeLineJoin="Round"
+                                      Data="M1,3 L6,3 L7,4.5 L15,4.5 L15,13 L1,13 Z"/>
+                            </Button>
+                            <Button Style="{StaticResource IconButtonStyle}" ToolTip="Open in Trim Editor"
+                                    Command="{Binding DataContext.OpenInTrimEditorCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}">
+                                <Path Width="14" Height="14" Stretch="Uniform" Stroke="{DynamicResource PaperBrush}" StrokeThickness="1.3"
+                                      StrokeLineJoin="Round"
+                                      Data="M2,14 L2,12 L10,4 L12,6 L4,14 Z M10,4 L12,2 L14,4 L12,6 Z"/>
+                            </Button>
+                            <Button Style="{StaticResource IconButtonStyle}" ToolTip="Add to Edit"
+                                    Command="{Binding DataContext.AddToSequenceCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}">
+                                <Path Width="14" Height="14" Stretch="Uniform" Stroke="{DynamicResource PaperBrush}" StrokeThickness="1.3"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Data="M7,1 L7,13 M1,7 L13,7"/>
+                            </Button>
+                            <Button Style="{StaticResource IconButtonStyle}" ToolTip="Delete"
+                                    Command="{Binding DataContext.DeleteCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}">
+                                <Path Width="12" Height="14" Stretch="Uniform" Stroke="{DynamicResource TallyRedBrush}" StrokeThickness="1.3"
+                                      StrokeLineJoin="Round"
+                                      Data="M1,4 L13,4 M5,4 L5,1.5 L9,1.5 L9,4 M3,4 L3,14 L11,14 L11,4 M5.5,7 L5.5,11 M8.5,7 L8.5,11"/>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid Background="{DynamicResource InkBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Title row: page title on the left, REFRESH/FILTERS/search right-docked on the same line
+             instead of a row of their own beneath it - one aligned strip instead of title text floating
+             above unrelated controls. Only relevant to the Library grid, so still hidden on Edit/ClipEditor/
+             Tags exactly as before. -->
+        <DockPanel Grid.Row="0" Margin="16,14,16,10" LastChildFill="False">
+            <TextBlock DockPanel.Dock="Left" Text="CLIP-SYS // CL-001" FontFamily="{StaticResource MonoFont}"
+                       FontWeight="Bold" FontSize="15" VerticalAlignment="Center"/>
+
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding CurrentView}" Value="Library">
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding CurrentView}" Value="Edit">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding CurrentView}" Value="ClipEditor">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
+
+                <!-- Placeholder-text search box: the TextBlock behind shows only while Text is empty. -->
+                <Grid VerticalAlignment="Center">
+                    <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Width="220"
+                             FontFamily="{StaticResource MonoFont}"/>
+                    <TextBlock Text="SEARCH_CLIPS..." Foreground="{DynamicResource DimBrush}" FontFamily="{StaticResource MonoFont}"
+                               FontSize="11" Margin="8,0,0,0" IsHitTestVisible="False" HorizontalAlignment="Left" VerticalAlignment="Center">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SearchText.Length}" Value="0">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
+
+                <!-- FILTERS: opens a popup with the tag AND-filter (moved out of its own always-visible
+                     chip row - it's a filter, so it belongs behind the filter control, same as TYPE) plus
+                     the Clips-vs-Recordings type filter. A tertiary border/label means something is
+                     currently narrowing the grid, so FILTERS doesn't look identical whether active or not.
+                     Popup uses StaysOpen="True" (not the ComboBox pattern) - a plain Button toggling
+                     IsFilterPanelOpen is simpler than reproducing ComboBox's ClickMode="Press" workaround
+                     for a custom Popup, and re-clicking FILTERS to close it is a fine tradeoff here. -->
+                <Grid Margin="8,0,0,0">
+                    <Button Content="FILTERS" Padding="10,4" Command="{Binding ToggleFilterPanelCommand}">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasActiveFilters}" Value="True">
+                                        <Setter Property="BorderBrush" Value="{DynamicResource TertiaryBrush}"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource TertiaryBrush}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                    <Popup IsOpen="{Binding IsFilterPanelOpen}" Placement="Bottom" StaysOpen="True"
+                           AllowsTransparency="True" PopupAnimation="None" Margin="0,4,0,0">
+                        <Border Background="{DynamicResource DeckBrush}" BorderBrush="{DynamicResource HairlineBrush}"
+                                BorderThickness="1" Padding="12" Width="260">
+                            <StackPanel>
+                                <TextBlock Text="TYPE" Style="{StaticResource EyebrowTextStyle}" Margin="0,0,0,6"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                                    <Button Content="ALL" Padding="8,4" Margin="0,0,6,0"
+                                            Command="{Binding SetTypeFilterCommand}" CommandParameter="All">
+                                        <Button.Style>
+                                            <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding TypeFilter}" Value="All">
+                                                        <Setter Property="Background" Value="{DynamicResource TertiaryBrush}"/>
+                                                        <Setter Property="Foreground" Value="{StaticResource SecondaryBrush}"/>
+                                                        <Setter Property="BorderBrush" Value="{DynamicResource TertiaryBrush}"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                    <Button Content="CLIPS" Padding="8,4" Margin="0,0,6,0"
+                                            Command="{Binding SetTypeFilterCommand}" CommandParameter="Clips"
+                                            ToolTip="Trimmed/exported clips only">
+                                        <Button.Style>
+                                            <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding TypeFilter}" Value="Clips">
+                                                        <Setter Property="Background" Value="{DynamicResource TertiaryBrush}"/>
+                                                        <Setter Property="Foreground" Value="{StaticResource SecondaryBrush}"/>
+                                                        <Setter Property="BorderBrush" Value="{DynamicResource TertiaryBrush}"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                    <Button Content="RECORDINGS" Padding="8,4"
+                                            Command="{Binding SetTypeFilterCommand}" CommandParameter="Recordings"
+                                            ToolTip="Raw replay-buffer/manual recordings only">
+                                        <Button.Style>
+                                            <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding TypeFilter}" Value="Recordings">
+                                                        <Setter Property="Background" Value="{DynamicResource TertiaryBrush}"/>
+                                                        <Setter Property="Foreground" Value="{StaticResource SecondaryBrush}"/>
+                                                        <Setter Property="BorderBrush" Value="{DynamicResource TertiaryBrush}"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                </StackPanel>
+
+                                <TextBlock Text="TAGS" Style="{StaticResource EyebrowTextStyle}" Margin="0,0,0,6"/>
+                                <ItemsControl ItemsSource="{Binding AllTags}" Margin="0,0,0,14">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel Orientation="Horizontal"/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type vm:TagViewModel}">
+                                            <Button Padding="8,4" Margin="0,0,6,6"
+                                                    Command="{Binding DataContext.ToggleTagFilterCommand, RelativeSource={RelativeSource AncestorType=views:ClipBrowserView}}"
+                                                    CommandParameter="{Binding}">
+                                                <Button.Style>
+                                                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                                        <Setter Property="BorderBrush" Value="{Binding ColorHex, Converter={StaticResource HexToBrushConverter}}"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                                <Setter Property="Background" Value="{Binding ColorHex, Converter={StaticResource HexToBrushConverter}}"/>
+                                                                <Setter Property="Foreground" Value="{StaticResource SecondaryBrush}"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Button.Style>
+                                                <TextBlock Text="{Binding Name}" FontSize="10"/>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="No tags yet - create one from TAGS below." FontSize="10"
+                                           Foreground="{DynamicResource DimBrush}" TextWrapping="Wrap" Margin="0,0,0,14">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding AllTags.Count}" Value="0">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+
+                                <Button Content="CLEAR FILTERS" Padding="10,4" HorizontalAlignment="Left"
+                                        Style="{StaticResource OutlinedButtonStyle}" Command="{Binding ClearFiltersCommand}"/>
+                            </StackPanel>
+                        </Border>
+                    </Popup>
+                </Grid>
+
+                <Button Content="REFRESH" Padding="10,4" Margin="8,0,0,0" Command="{Binding RefreshCommand}"/>
+            </StackPanel>
+        </DockPanel>
+
+        <!-- Sub-navigation: LIBRARY (the grid), EDIT (the multi-clip combine+trim editor), and TAGS (the
+             tag manager) - one coherent pill group via SubNavButtonStyle (Theme.xaml): dim/transparent by
+             default, white label + tertiary bottom accent when its CurrentView value is active. Status
+             message moved down here (right-docked) since it's about an in-progress action, not part of
+             the title strip above. -->
+        <DockPanel Grid.Row="1" Margin="16,0,16,10" LastChildFill="True">
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                <Button Content="LIBRARY" Command="{Binding BackToLibraryCommand}">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource SubNavButtonStyle}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding CurrentView}" Value="Library">
+                                    <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}"/>
+                                    <Setter Property="BorderBrush" Value="{DynamicResource TertiaryBrush}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button Content="EDIT" Command="{Binding ShowMultiClipEditorCommand}"
+                        ToolTip="Combine and trim multiple clips into one exported file">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource SubNavButtonStyle}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding CurrentView}" Value="Edit">
+                                    <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}"/>
+                                    <Setter Property="BorderBrush" Value="{DynamicResource TertiaryBrush}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button Content="TAGS" Command="{Binding ShowTagManagerCommand}" ToolTip="Create, recolor, and assign tags">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource SubNavButtonStyle}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding CurrentView}" Value="Tags">
+                                    <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}"/>
+                                    <Setter Property="BorderBrush" Value="{DynamicResource TertiaryBrush}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+            </StackPanel>
+
+            <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" MaxWidth="320" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TallyRedBrush}" Text="{Binding StatusMessage}"/>
+        </DockPanel>
+
+        <!-- LIBRARY sub-view -->
+        <Grid Grid.Row="2">
+            <Grid.Style>
+                <Style TargetType="Grid">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding CurrentView}" Value="Library">
+                            <Setter Property="Visibility" Value="Visible"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding CurrentView}" Value="Edit">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding CurrentView}" Value="ClipEditor">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding CurrentView}" Value="Tags">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Grid.Style>
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl ItemsSource="{Binding ClipsView}" ItemTemplate="{StaticResource ClipTileTemplate}"
+                              Margin="4">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel Orientation="Horizontal"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                </ItemsControl>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- TAGS sub-view: create/recolor/rename/delete tags on the left, assign the selected tag to clips
+             via checkboxes on the right - same master-detail shape as GameProfilesView, so it reads as the
+             same kind of screen rather than inventing a new interaction (e.g. per-card popups, which this
+             app's WPF chrome doesn't have an established pattern for yet). -->
+        <views:TagManagerView Grid.Row="2" DataContext="{Binding TagManager}" Margin="16,0,16,16">
+            <views:TagManagerView.Style>
+                <Style TargetType="views:TagManagerView">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding DataContext.CurrentView, RelativeSource={RelativeSource AncestorType=views:ClipBrowserView}}" Value="Tags">
+                            <Setter Property="Visibility" Value="Visible"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </views:TagManagerView.Style>
+        </views:TagManagerView>
+
+        <!-- ClipEditor sub-view: the embedded single-clip editor - a different system from the EDIT nav
+             pill above (that's the multi-clip combiner). Opened per-clip via a clip's pencil icon or the
+             switcher inside this view; ActiveEditor is null until then, so the panel just shows nothing
+             rather than needing a placeholder - you never arrive here blank on purpose. -->
+        <views:TrimEditorView Grid.Row="2" DataContext="{Binding ActiveEditor}" Margin="16,0,16,16">
+            <views:TrimEditorView.Style>
+                <Style TargetType="views:TrimEditorView">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding DataContext.CurrentView, RelativeSource={RelativeSource AncestorType=views:ClipBrowserView}}" Value="ClipEditor">
+                            <Setter Property="Visibility" Value="Visible"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </views:TrimEditorView.Style>
+        </views:TrimEditorView>
+
+        <!-- EDIT sub-view: the simple "pick clips, trim each, export as one file" multi-clip editor -
+             what used to be a separate SEQUENCE tab, now the entire content behind the EDIT nav pill.
+             Still backed by SequenceEditorViewModel/SequenceRepository internally (see their doc comments
+             for why there's exactly one persistent workspace rather than a list of saved projects) - only
+             the outward "Sequence" naming went away, not the underlying mechanism. -->
+        <Grid Grid.Row="2" Margin="16,0,16,16" DataContext="{Binding Sequence}">
+            <Grid.Style>
+                <Style TargetType="Grid">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding DataContext.CurrentView, RelativeSource={RelativeSource AncestorType=views:ClipBrowserView}}" Value="Edit">
+                            <Setter Property="Visibility" Value="Visible"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Grid.Style>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
+                <TextBlock Text="EDIT" Style="{StaticResource EyebrowTextStyle}" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,16,0"/>
+                <TextBlock VerticalAlignment="Center" Style="{StaticResource EyebrowTextStyle}">
+                    <Run Text="{Binding Items.Count, Mode=OneWay}"/>
+                    <Run Text="CLIPS - add more from the LIBRARY tile's + icon"/>
+                </TextBlock>
+            </StackPanel>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl ItemsSource="{Binding Items}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:SequenceClipRowViewModel}">
+                            <Border Background="{DynamicResource DeckBrush}" BorderBrush="{DynamicResource HairlineBrush}"
+                                    BorderThickness="1" Padding="10" Margin="0,0,0,8">
+                                <DockPanel LastChildFill="True">
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button Style="{StaticResource IconButtonStyle}" ToolTip="Move Up"
+                                                Command="{Binding DataContext.MoveUpCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                CommandParameter="{Binding}">
+                                            <Path Width="10" Height="10" Stretch="Uniform" Stroke="{DynamicResource PaperBrush}" StrokeThickness="1.4"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M1,7 L5,1 L9,7"/>
+                                        </Button>
+                                        <Button Style="{StaticResource IconButtonStyle}" ToolTip="Move Down"
+                                                Command="{Binding DataContext.MoveDownCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                CommandParameter="{Binding}">
+                                            <Path Width="10" Height="10" Stretch="Uniform" Stroke="{DynamicResource PaperBrush}" StrokeThickness="1.4"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M1,1 L5,7 L9,1"/>
+                                        </Button>
+                                        <Button Style="{StaticResource IconButtonStyle}" ToolTip="Remove from Edit"
+                                                Command="{Binding DataContext.RemoveClipCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                CommandParameter="{Binding}">
+                                            <Path Width="12" Height="14" Stretch="Uniform" Stroke="{DynamicResource TallyRedBrush}" StrokeThickness="1.3"
+                                                  StrokeLineJoin="Round"
+                                                  Data="M1,4 L13,4 M5,4 L5,1.5 L9,1.5 L9,4 M3,4 L3,14 L11,14 L11,4 M5.5,7 L5.5,11 M8.5,7 L8.5,11"/>
+                                        </Button>
+                                    </StackPanel>
+                                    <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center" Width="220" TextTrimming="CharacterEllipsis"
+                                               FontFamily="{StaticResource MonoFont}" FontWeight="Bold" FontSize="11" Text="{Binding FileNameTag}"/>
+                                    <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
+                                        <TextBlock Text="IN" Style="{StaticResource EyebrowTextStyle}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                        <TextBox Width="60" FontFamily="{StaticResource MonoFont}" VerticalContentAlignment="Center"
+                                                 Text="{Binding InPointSeconds, StringFormat=0.0, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <TextBlock Text="OUT" Style="{StaticResource EyebrowTextStyle}" VerticalAlignment="Center" Margin="16,0,6,0"/>
+                                        <TextBox Width="60" FontFamily="{StaticResource MonoFont}" VerticalContentAlignment="Center"
+                                                 Text="{Binding OutPointSeconds, StringFormat=0.0, UpdateSourceTrigger=PropertyChanged}"/>
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <DockPanel Grid.Row="2" Margin="0,10,0,0" LastChildFill="False">
+                <Button DockPanel.Dock="Left" Content="EXPORT" Padding="14,6" Margin="0,0,8,0"
+                        Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ExportCommand}"/>
+                <Button DockPanel.Dock="Left" Content="CLEAR ALL" Padding="14,6"
+                        Style="{StaticResource OutlinedButtonStyle}" Command="{Binding ClearAllCommand}"/>
+                <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" Foreground="{DynamicResource TallyRedBrush}"
+                           Text="{Binding StatusMessage}" TextWrapping="Wrap" MaxWidth="400"/>
+            </DockPanel>
+        </Grid>
+    </Grid>
+</UserControl>

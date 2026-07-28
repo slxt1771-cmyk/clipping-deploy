@@ -1,0 +1,13 @@
+bin/
+obj/
+.claude/worktrees/
+*.user
+Recordings/
+Exports/
+app_stdout.log
+app_stderr.log
+*.db
+*.db-shm
+*.db-wal
+.claude/
+tools/ffmpeg/*.exe

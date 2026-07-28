@@ -1,0 +1,185 @@
+using ClippingSoftware.Core.GameDetection;
+using ClippingSoftware.Core.Obs;
+using ClippingSoftware.Data.Models;
+
+namespace ClippingSoftware.Core.ProfileManager;
+
+/// <summary>
+/// Subscribes to GameDetectionService.DetectedGameChanged and diffs the incoming GameProfile against the
+/// currently-applied one, implementing the plan's light-switch vs heavy-switch logic:
+///
+///   Light switch (capture mode / mic-enabled / desktop-audio-enabled differ only): mute/unmute the
+///   relevant OBS audio inputs directly - no output interruption.
+///
+///   Heavy switch (resolution / fps / OBS profile / encoder settings differ): obs-websocket rejects
+///   SetVideoSettings/SetCurrentProfile while an output is running, so if the replay buffer is active this
+///   flushes it (SaveReplayBuffer -> StopReplayBuffer), applies the video/profile change, then restarts the
+///   buffer (StartReplayBuffer), accepting the resulting ~1-2s gap per the plan.
+/// </summary>
+public sealed class ProfileApplier : IDisposable
+{
+    private readonly ObsController _obs;
+    private readonly GameDetectionService _detectionService;
+    private readonly object _applyLock = new();
+
+    private GameProfile? _currentProfile;
+
+    /// <summary>Raised after a profile has been applied. The bool indicates whether it was a heavy switch.</summary>
+    public event Action<GameProfile, bool>? ProfileApplied;
+
+    public ProfileApplier(ObsController obs, GameDetectionService detectionService)
+    {
+        _obs = obs;
+        _detectionService = detectionService;
+        _detectionService.DetectedGameChanged += OnDetectedGameChanged;
+    }
+
+    private void OnDetectedGameChanged(GameProfile profile, string? displayName, string? processName)
+    {
+        lock (_applyLock)
+        {
+            Apply(profile);
+        }
+    }
+
+    private void Apply(GameProfile profile)
+    {
+        if (!_obs.IsConnected)
+        {
+            return;
+        }
+
+        var previous = _currentProfile;
+        if (previous is not null && previous.Id == profile.Id)
+        {
+            return;
+        }
+
+        var isHeavySwitch = previous is null || RequiresHeavySwitch(previous, profile);
+
+        if (isHeavySwitch)
+        {
+            ApplyHeavySwitch(profile);
+        }
+        else
+        {
+            ApplyLightSwitch(profile);
+        }
+
+        _currentProfile = profile;
+        ProfileApplied?.Invoke(profile, isHeavySwitch);
+    }
+
+    private static bool RequiresHeavySwitch(GameProfile previous, GameProfile next) =>
+        previous.OutputWidth != next.OutputWidth ||
+        previous.OutputHeight != next.OutputHeight ||
+        previous.Fps != next.Fps ||
+        previous.ObsProfileName != next.ObsProfileName ||
+        !EncoderMatches(previous.Encoder, next.Encoder);
+
+    private static bool EncoderMatches(NvencSettings a, NvencSettings b) =>
+        a.Codec == b.Codec &&
+        a.RateControl == b.RateControl &&
+        a.CqLevel == b.CqLevel &&
+        a.Preset == b.Preset &&
+        a.Tuning == b.Tuning &&
+        a.Multipass == b.Multipass &&
+        a.KeyframeIntervalSec == b.KeyframeIntervalSec;
+
+    private void ApplyLightSwitch(GameProfile profile)
+    {
+        ApplyAudioMuteState(profile);
+        ApplyCaptureTarget(profile);
+    }
+
+    private void ApplyHeavySwitch(GameProfile profile)
+    {
+        var replayBufferWasActive = _obs.GetReplayBufferActive();
+
+        if (replayBufferWasActive)
+        {
+            _obs.SaveReplayBuffer();
+            // Give OBS a moment to flush the in-flight save before pulling the buffer out from under it.
+            Thread.Sleep(500);
+            _obs.StopReplayBuffer();
+        }
+
+        if (!string.Equals(_obs.GetCurrentProfileName(), profile.ObsProfileName, StringComparison.Ordinal))
+        {
+            _obs.SetCurrentProfile(profile.ObsProfileName);
+        }
+
+        _obs.SetVideoSettings(
+            baseWidth: profile.OutputWidth,
+            baseHeight: profile.OutputHeight,
+            outputWidth: profile.OutputWidth,
+            outputHeight: profile.OutputHeight,
+            fpsNumerator: profile.Fps,
+            fpsDenominator: 1);
+
+        ApplyAudioMuteState(profile);
+        ApplyCaptureTarget(profile);
+
+        if (replayBufferWasActive)
+        {
+            _obs.StartReplayBuffer();
+        }
+    }
+
+    private void ApplyAudioMuteState(GameProfile profile)
+    {
+        TrySetMute("Desktop Audio", !profile.DesktopAudioEnabled);
+        TrySetMute("Mic/Aux", !profile.MicEnabled);
+    }
+
+    /// <summary>
+    /// Applies a profile's capture mode/target: flips which of Display Capture / Window Capture is the live
+    /// scene item, then (if the profile specifies one) points that source at its saved monitor/window. Runs
+    /// as part of both light and heavy switch - flipping which source is enabled doesn't need an output
+    /// stopped, so there's no reason to gate it behind the heavy-switch path.
+    /// </summary>
+    private void ApplyCaptureTarget(GameProfile profile)
+    {
+        var useWindowCapture = profile.CaptureMode == "WindowCapture";
+
+        try
+        {
+            _obs.SetCaptureMode(
+                ObsController.DefaultSceneName,
+                ObsController.DisplayCaptureSourceName,
+                ObsController.WindowCaptureSourceName,
+                useWindowCapture);
+
+            if (useWindowCapture && !string.IsNullOrEmpty(profile.CaptureTargetWindow))
+            {
+                _obs.SetWindowCaptureTarget(ObsController.WindowCaptureSourceName, profile.CaptureTargetWindow);
+            }
+            else if (!useWindowCapture && !string.IsNullOrEmpty(profile.CaptureTargetMonitorId))
+            {
+                _obs.SetMonitorCaptureTarget(ObsController.DisplayCaptureSourceName, profile.CaptureTargetMonitorId);
+            }
+        }
+        catch
+        {
+            // Capture sources may not exist yet in the active scene collection - non-fatal, matches
+            // TrySetMute's tolerance below.
+        }
+    }
+
+    private void TrySetMute(string inputName, bool muted)
+    {
+        try
+        {
+            _obs.SetInputMute(inputName, muted);
+        }
+        catch
+        {
+            // Input may not exist under this name in the active scene collection - non-fatal.
+        }
+    }
+
+    public void Dispose()
+    {
+        _detectionService.DetectedGameChanged -= OnDetectedGameChanged;
+    }
+}

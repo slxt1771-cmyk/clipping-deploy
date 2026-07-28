@@ -1,0 +1,22 @@
+[
+  { "displayName": "VALORANT", "executables": ["VALORANT-Win64-Shipping.exe"] },
+  { "displayName": "League of Legends", "executables": ["League of Legends.exe", "LeagueClient.exe"] },
+  { "displayName": "Counter-Strike 2", "executables": ["cs2.exe"] },
+  { "displayName": "Minecraft", "executables": ["javaw.exe", "Minecraft.Windows.exe"] },
+  { "displayName": "Grand Theft Auto V", "executables": ["GTA5.exe"] },
+  { "displayName": "Fortnite", "executables": ["FortniteClient-Win64-Shipping.exe"] },
+  { "displayName": "Apex Legends", "executables": ["r5apex.exe"] },
+  { "displayName": "Overwatch 2", "executables": ["Overwatch.exe"] },
+  { "displayName": "Rocket League", "executables": ["RocketLeague.exe"] },
+  { "displayName": "Baldur's Gate 3", "executables": ["bg3.exe", "bg3_dx11.exe"] },
+  { "displayName": "Dota 2", "executables": ["dota2.exe"] },
+  { "displayName": "PUBG: BATTLEGROUNDS", "executables": ["TslGame.exe"] },
+  { "displayName": "Call of Duty", "executables": ["cod.exe"] },
+  { "displayName": "Destiny 2", "executables": ["destiny2.exe"] },
+  { "displayName": "Elden Ring", "executables": ["eldenring.exe"] },
+  { "displayName": "Cyberpunk 2077", "executables": ["Cyberpunk2077.exe"] },
+  { "displayName": "World of Warcraft", "executables": ["Wow.exe", "WowClassic.exe"] },
+  { "displayName": "Escape from Tarkov", "executables": ["EscapeFromTarkov.exe"] },
+  { "displayName": "Rainbow Six Siege", "executables": ["RainbowSix.exe"] },
+  { "displayName": "Halo Infinite", "executables": ["HaloInfinite.exe"] }
+]
