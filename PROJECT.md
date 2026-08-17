@@ -155,6 +155,41 @@ are now done. What's left is smaller polish items — see below.
   True live isolation (so Desktop Audio itself never picks up a given app) would need routing that app's
   output to a non-default Windows playback device - an OS-level setup step for the user, not something this
   app's code can do on its own.
+- **Full-codebase bug-hunt pass, requested the same session.** Systematic read-through of every project
+  (Core interop/detection/profile-switching, the recording pipeline, the Data layer, App ViewModels/Views),
+  fixing everything confirmed as a real bug rather than a style nit:
+  - `ProfileApplier.ApplyHeavySwitch` only checked the replay buffer before calling `SetCurrentProfile`/
+    `SetVideoSettings`, never an active *recording* - obs-websocket rejects both while any output is
+    running, so switching games while manually recording threw and silently aborted the whole method
+    (including the mute/capture-target changes that don't need an output stopped), leaving the profile
+    stuck out of sync until the next foreground change failed the same way. Now guards on a new
+    `ObsController.GetRecordingActive()`, deferring only the video-settings change while recording (never
+    auto-stopping a user's recording just to apply one) while still applying mute/capture-target regardless.
+  - `ForegroundWatcher.Dispose()` could race its own hook thread's startup: if disposed before the thread
+    had set its ID, it silently skipped `PostThreadMessage(WM_QUIT)` and leaked the thread/hook for the rest
+    of the process. Fixed with a `ManualResetEventSlim` signaled once the hook's message queue actually
+    exists, so `Dispose()` waits for real readiness instead of racing a bare field check.
+  - `TrimEditorView`'s `_isPlaying` flag wasn't reset on a clip switch, so a click on the video during the
+    async `MediaOpened` gap after switching clips could pause instead of play.
+  - Deleting a clip (`ClipBrowserViewModel.Delete`) never cleaned up references to it elsewhere in memory:
+    the Sequence workspace kept a row pointing at the now-deleted file (`SequenceEditorViewModel.
+    RemoveClipReferences`, new), and the Tag Manager's clip checklist kept a stale, still-interactive row
+    for it (`TagManagerViewModel.RebuildClipRows` made public so `Delete` can trigger it).
+  - Every ffmpeg/ffprobe invocation across the recording pipeline left its child process running in the
+    background if cancellation or a stream-read failure threw past the `using var process` - `Dispose()`
+    only releases the .NET wrapper, never kills the OS process. New `Core/Recording/ProcessCleanup.
+    KillIfRunning`, called from a `finally` at every call site (`ClipTrimmer`, `AudioTrackExtractor`,
+    `ClipMetadataExtractor`, `ThumbnailGenerator`, `SequenceExporter`).
+  - `ClipTrimmer`'s output filename had only second-resolution uniqueness, so `SequenceExporter` trimming
+    two segments from the same source clip in a tight loop could collide and silently overwrite one
+    segment's output - added a short random suffix (also applied to `SequenceExporter`'s own final output
+    filename for the same reason).
+  - `SequenceExporter`'s concat list-file quoting broke on a single quote in the output directory path
+    (caller-supplied - ultimately `AppSettings.ExportStorageFolder`, not actually always-safe content as
+    the old comment claimed) - now escapes embedded quotes per the concat demuxer's documented format.
+  - Reviewed and found no confident bugs in: the Data layer (every repository/migration/JSON round-trip),
+    `ObsController`, `ObsProcessManager`, `GameDetectionService`, `GlobalHotkeyService`, `SoundCuePlayer`,
+    and the rest of the App layer's converters/theming/tray-icon code.
 
 - **Visual identity pass.** The app moved from an early tally-lamp red/green/amber palette to a
   strict 4-family system (Primary white / Secondary black / Tertiary pale-lavender signal color /
