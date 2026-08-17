@@ -52,4 +52,15 @@ public static class ColorUtils
     }
 
     public static string ToHex(Color color) => $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+
+    /// <summary>Black or white, whichever reads legibly on <paramref name="background"/> - for text drawn
+    /// directly on a user-picked color (tag chips) rather than one of the theme's own fixed surfaces, where
+    /// a single hardcoded text color can land on a background dark enough to make it unreadable. Uses the
+    /// standard perceptual-luminance weighting (ITU-R BT.601) rather than a flat RGB average, since the eye
+    /// is far more sensitive to green than red/blue - a flat average misjudges saturated colors.</summary>
+    public static Color GetReadableForeground(Color background)
+    {
+        var luminance = (0.299 * background.R + 0.587 * background.G + 0.114 * background.B) / 255.0;
+        return luminance > 0.6 ? Colors.Black : Colors.White;
+    }
 }
