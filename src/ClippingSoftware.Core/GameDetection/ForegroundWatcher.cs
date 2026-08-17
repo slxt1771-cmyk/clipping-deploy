@@ -20,6 +20,13 @@ public sealed class ForegroundWatcher : IDisposable
     private readonly object _lock = new();
     private Thread? _hookThread;
     private volatile uint _hookThreadId;
+
+    // Signaled once HookThreadProc has actually installed the hook and has a live message queue to post
+    // to - _hookThreadId alone isn't enough of a readiness signal, since Dispose() could otherwise run
+    // (and see _hookThreadId still 0) before the OS has scheduled the new thread far enough to set it,
+    // in which case Dispose() would skip PostThreadMessage entirely and the thread/hook would leak forever
+    // (Join would just time out with nothing left to ever wake it).
+    private readonly ManualResetEventSlim _hookThreadReady = new(false);
     private Timer? _pollTimer;
     private IntPtr _lastHwnd;
     private bool _started;
@@ -70,6 +77,11 @@ public sealed class ForegroundWatcher : IDisposable
             0,
             0,
             Win32Window.WINEVENT_OUTOFCONTEXT | Win32Window.WINEVENT_SKIPOWNPROCESS);
+
+        // The thread's message queue exists by this point (SetWinEventHook with WINEVENT_OUTOFCONTEXT
+        // creates one for the calling thread if it doesn't already have one) - safe to signal Dispose()
+        // that PostThreadMessage will now actually reach this thread's GetMessage loop below.
+        _hookThreadReady.Set();
 
         try
         {
@@ -188,11 +200,15 @@ public sealed class ForegroundWatcher : IDisposable
 
         _pollTimer?.Dispose();
 
-        if (_hookThreadId != 0)
+        // Wait for the hook thread to actually have a message queue before trying to post to it - see
+        // _hookThreadReady's doc comment. Only relevant if Start() was ever called (_hookThread not null);
+        // the 2s timeout is defensive (matches the Join below) in case the thread never gets there at all.
+        if (_hookThread is not null && _hookThreadReady.Wait(TimeSpan.FromSeconds(2)) && _hookThreadId != 0)
         {
             Win32Window.PostThreadMessage(_hookThreadId, Win32Window.WM_QUIT, IntPtr.Zero, IntPtr.Zero);
         }
 
         _hookThread?.Join(TimeSpan.FromSeconds(2));
+        _hookThreadReady.Dispose();
     }
 }

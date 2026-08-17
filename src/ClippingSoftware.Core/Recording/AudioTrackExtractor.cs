@@ -65,15 +65,22 @@ public class AudioTrackExtractor(string? ffmpegPath = null)
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to start ffmpeg.");
 
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        var stderr = await stderrTask;
-
-        if (process.ExitCode != 0 || outputPaths.Any(p => !File.Exists(p)))
+        try
         {
-            throw new InvalidOperationException($"ffmpeg audio track extraction failed (exit {process.ExitCode}): {stderr}");
-        }
+            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken);
+            var stderr = await stderrTask;
 
-        return outputPaths;
+            if (process.ExitCode != 0 || outputPaths.Any(p => !File.Exists(p)))
+            {
+                throw new InvalidOperationException($"ffmpeg audio track extraction failed (exit {process.ExitCode}): {stderr}");
+            }
+
+            return outputPaths;
+        }
+        finally
+        {
+            ProcessCleanup.KillIfRunning(process);
+        }
     }
 }

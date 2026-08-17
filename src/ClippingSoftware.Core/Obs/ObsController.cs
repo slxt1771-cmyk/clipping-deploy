@@ -56,6 +56,14 @@ public class ObsController : IDisposable
 
     public bool GetReplayBufferActive() => _obs.GetReplayBufferStatus();
 
+    /// <summary>Whether OBS is currently recording (independent of the replay buffer - see
+    /// GetReplayBufferActive). Via SendRawRequest since OBSWebsocketDotNet 5.0.1 has no typed wrapper for
+    /// GetRecordStatus, same escape-hatch reasoning as GetInputVolume/GetProfileParameter below. ProfileApplier
+    /// needs this to know whether a heavy switch's SetVideoSettings/SetCurrentProfile calls would be rejected -
+    /// unlike the replay buffer, a manual recording is a deliberate user action this app must not silently
+    /// stop just to apply a profile's video settings.</summary>
+    public bool GetRecordingActive() => SendRawRequest("GetRecordStatus")["outputActive"]?.Value<bool>() ?? false;
+
     public string GetRecordDirectory() => _obs.GetRecordDirectory();
 
     public List<string> GetSceneItemSourceNames(string sceneName)

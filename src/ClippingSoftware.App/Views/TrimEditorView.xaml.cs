@@ -43,6 +43,12 @@ public partial class TrimEditorView : UserControl
             Player.Stop();
             Player.Close();
 
+            // Reset here rather than waiting for the new clip's Player_MediaOpened to correct it - that
+            // fires asynchronously once the new file finishes opening, so a click on the video in between
+            // (Player_Click) would otherwise read the previous clip's still-true _isPlaying and pause
+            // instead of play, with no visible effect since nothing was actually playing yet.
+            _isPlaying = false;
+
             if (e.NewValue is TrimEditorViewModel vm)
             {
                 Player.Source = new Uri(vm.SourceClip.FilePath);

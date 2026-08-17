@@ -78,18 +78,25 @@ public class ClipMetadataExtractor(string? ffprobePath = null)
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to start ffprobe.");
 
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-
-        if (process.ExitCode != 0)
+        try
         {
-            throw new InvalidOperationException($"ffprobe exited with code {process.ExitCode}: {stderr}");
-        }
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken);
 
-        return stdout;
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
+
+            if (process.ExitCode != 0)
+            {
+                throw new InvalidOperationException($"ffprobe exited with code {process.ExitCode}: {stderr}");
+            }
+
+            return stdout;
+        }
+        finally
+        {
+            ProcessCleanup.KillIfRunning(process);
+        }
     }
 }

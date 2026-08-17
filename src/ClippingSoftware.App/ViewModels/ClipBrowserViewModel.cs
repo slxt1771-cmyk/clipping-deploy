@@ -400,6 +400,13 @@ public partial class ClipBrowserViewModel : ObservableObject, IDisposable
             _clipRepository.Delete(item.Id);
             _tagRepository.RemoveAllForClip(item.Id);
             Clips.Remove(item);
+
+            // Neither of these otherwise notices a clip disappearing out from under it: the Sequence
+            // workspace can hold this same clip via AddToSequence (its row would keep pointing at the file
+            // just deleted above), and the Tags checklist keeps a snapshot that's only rebuilt when
+            // SelectedTag changes (a still-selected tag would keep showing this clip's now-stale row).
+            Sequence.RemoveClipReferences(item.Id);
+            TagManager.RebuildClipRows();
         }
         catch (Exception ex)
         {

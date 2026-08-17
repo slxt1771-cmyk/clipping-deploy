@@ -97,6 +97,27 @@ public partial class SequenceEditorViewModel : ObservableObject
         Items.Add(CreateRow(record, clip));
     }
 
+    /// <summary>Removes every row referencing a given clip - called by ClipBrowserViewModel when a clip is
+    /// deleted from the library, so this workspace doesn't keep holding a row pointing at a file/DB row
+    /// that no longer exists (the constructor-time load already skips a row like that; this is the same
+    /// policy applied live instead of only at startup - see the constructor's doc comment).</summary>
+    public void RemoveClipReferences(Guid clipId)
+    {
+        var toRemove = Items.Where(row => row.Clip.Id == clipId).ToList();
+        if (toRemove.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var row in toRemove)
+        {
+            _sequenceRepository.Remove(row.Id);
+            Items.Remove(row);
+        }
+
+        PersistOrder();
+    }
+
     [RelayCommand]
     private void RemoveClip(SequenceClipRowViewModel? row)
     {
