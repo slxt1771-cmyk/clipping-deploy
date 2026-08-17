@@ -34,7 +34,10 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       # The version the app reports and the version stamped on Setup.exe come from the same place -
-      # the csproj - so they can't drift. A tagged build overrides it with the tag itself.
+      # the csproj - so they can't drift. A tagged build overrides it with the tag itself; a plain push
+      # to main overrides it with an auto-incrementing "1.0.<run number>" instead - see the "Publish
+      # GitHub release" step below for why that path exists at all: the in-app auto-updater needs a
+      # release to appear on every change, not just when someone remembers to cut a tag.
       - name: Resolve version
         id: version
         shell: pwsh
@@ -43,6 +46,8 @@ jobs:
           $version = ([xml](Get-Content $csproj)).Project.PropertyGroup.Version | Where-Object { $_ }
           if ("${{ github.ref_type }}" -eq "tag") {
             $version = "${{ github.ref_name }}" -replace '^v', ''
+          } elseif ("${{ github.ref }}" -eq "refs/heads/main") {
+            $version = "1.0.${{ github.run_number }}"
           }
           if (-not $version) { $version = "1.0.0" }
           "version=$version" >> $env:GITHUB_OUTPUT
@@ -135,11 +140,18 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      # Only on a version tag: a downloadable release page is the "just download the setup wizard"
-      # endpoint, and cutting one per branch push would bury it.
+      # On a version tag (a deliberate manual release) or a plain push to main (the auto-update source -
+      # MainViewModel.CheckForUpdatesAsync polls this repo's *latest* release, so every merge to main
+      # needs to actually produce one for "the update button shows up after I change something" to hold).
+      # Not on other branches/PRs - cutting a release on every feature-branch push would bury the ones
+      # that matter and spam installed clients with in-progress work as if it were a real release.
+      # tag_name is explicit rather than left to the action's own tag-inference so the main-push path
+      # (which has no tag yet) still gets one created - harmless/idempotent on the tag-triggered path,
+      # where it already matches the tag that triggered the run.
       - name: Publish GitHub release
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' || github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.version.outputs.version }}
           files: dist/*.exe
           generate_release_notes: true

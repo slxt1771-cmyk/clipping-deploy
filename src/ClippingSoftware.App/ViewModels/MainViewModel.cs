@@ -6,6 +6,7 @@ using ClippingSoftware.Core.Notifications;
 using ClippingSoftware.Core.Obs;
 using ClippingSoftware.Core.ProfileManager;
 using ClippingSoftware.Core.Recording;
+using ClippingSoftware.Core.Update;
 using ClippingSoftware.Data;
 using ClippingSoftware.Data.ClipLibrary;
 using ClippingSoftware.Data.Models;
@@ -48,6 +49,18 @@ public partial class MainViewModel : ObservableObject
     private readonly Timer _audioSourceRefreshTimer;
 
     private static readonly TimeSpan AudioSourceRefreshInterval = TimeSpan.FromMinutes(3);
+
+    /// <summary>Checks this repo's public GitHub Releases for a newer version than whatever's currently
+    /// installed - see UpdateChecker's own doc comment for why that's safe to do anonymously. Repo owner/
+    /// name are hardcoded rather than configurable: there's exactly one place this app is ever published
+    /// from, same reasoning as the other single-install-target assumptions already documented in
+    /// PROJECT.md.</summary>
+    private readonly UpdateChecker _updateChecker = new("slxt1771-cmyk", "clipping-deploy");
+
+    private AvailableUpdate? _pendingUpdate;
+
+    [ObservableProperty]
+    private bool _isUpdateAvailable;
 
     public ObsController ObsController => _obsController;
 
@@ -329,6 +342,7 @@ public partial class MainViewModel : ObservableObject
     {
         _ = ClipBrowser.LoadAsync();
         _ = GameProfiles.LoadAsync();
+        _ = CheckForUpdatesAsync();
 
         try
         {
@@ -359,6 +373,43 @@ public partial class MainViewModel : ObservableObject
         catch (Exception ex)
         {
             StatusMessage = $"Startup error: {ex.Message}";
+        }
+    }
+
+    /// <summary>Checked once on every launch - not periodically, since "open the app and see the update
+    /// button" is the actual requirement, and checking again mid-session wouldn't matter until the next
+    /// launch anyway (InstallUpdateCommand restarts the app once the update is applied).</summary>
+    private async Task CheckForUpdatesAsync()
+    {
+        var currentVersion = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version ?? new Version(1, 0, 0);
+        _pendingUpdate = await _updateChecker.CheckForUpdateAsync(currentVersion);
+        IsUpdateAvailable = _pendingUpdate is not null;
+    }
+
+    /// <summary>Downloads the update found by CheckForUpdatesAsync and runs its installer unattended. The
+    /// installer itself (see installer/ClippingSoftware.iss) closes this app's running process and relaunches
+    /// it once installed - this method doesn't need to orchestrate that handoff, only get the installer
+    /// downloaded and started.</summary>
+    [RelayCommand]
+    private async Task InstallUpdate()
+    {
+        if (_pendingUpdate is null)
+        {
+            return;
+        }
+
+        try
+        {
+            StatusMessage = "Downloading update...";
+            var progress = new Progress<int>(percent => StatusMessage = $"Downloading update ({percent}%)...");
+            var installerPath = await _updateChecker.DownloadUpdateAsync(_pendingUpdate, progress);
+
+            StatusMessage = "Installing update - Clipping Software will restart shortly...";
+            UpdateChecker.RunSilentInstall(installerPath);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Update failed: {ex.Message}";
         }
     }
 

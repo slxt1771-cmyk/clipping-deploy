@@ -26,9 +26,10 @@ changes; treat it as living, not historical.
 | M14 | Visual polish pass: custom control templates for the four controls still rendering with stock OS chrome | Done. `Theme.xaml` gained full `ControlTemplate`s for `CheckBox` (flat 16x16 box, tertiary checkmark), `RadioButton` (matching circular indicator), `ComboBox` (flat hairline border, hand-drawn chevron, dark popup, styled `ComboBoxItem`), and `ScrollBar` (thin track + pill thumb, no arrow buttons - restyling the type is enough since `ScrollViewer`'s own stock template just hosts `ScrollBar` internally, so every `ScrollViewer` in the app picked this up for free). `Slider`'s thumb was resized/rounded since it's now shared between the wide Trim Editor scrub bar and the compact per-row volume sliders added in M11/M13. Added hover states that didn't exist before: clip tiles in `ClipBrowserView` brighten their border on hover, `DataGridRow` gets a subtle background lift. While wiring this up, found and fixed 5 places (`MainWindow.xaml` x3, `GameProfilesView.xaml` x2) where an inline `ComboBox.Style`/`RadioButton.Style` block used for visibility/IsChecked toggling had no `BasedOn`, which silently discards the implicit type style entirely in WPF - those controls would have kept rendering with stock OS chrome despite the new theme. **Deliberately not done**: a custom window titlebar (replacing the native Windows chrome) - the other big lever for this look, but WPF's `WindowChrome` has a well-known content-bleeds-past-screen-edge bug specifically when combined with `WindowState="Maximized"` (which this window defaults to), and getting the fix wrong risks breaking resize/maximize/close in ways that can't be verified without eyes on the running app. Flagged as a follow-up rather than attempted blind. |
 | M15 | Nav moved to a left icon rail with Clips as the default tab, runtime Primary/Secondary accent-color customization, and the custom titlebar M14 deliberately deferred | Done - see below for detail on each. |
 | M16 | Tab restructure (Clips/Capture/Settings, in that order), Capture-vs-everything-else split, embedded per-clip editor with autosaved drafts, a simple multi-clip Sequence editor, and a layout/centering pass on Capture+Settings | Done - see below for detail on each. |
-| M18 | Packaging: Setup.exe installer wizard + Windows CI build, install-relative asset paths, in-app first-run setup wizard, and the bug-fix/deep-clean pass that packaging forced | Done — see below for detail. |
 | M17 | Page-by-page polish pass: Clips header reflow + a Filters popup, and folding Capture back into Settings | Done. **Clips**: the title row (`ClipBrowserView.xaml`) now right-docks SEARCH/FILTERS/REFRESH in line with "CLIP-SYS // CL-001" instead of a separate row below it, and the "MODULE_ID: CLIP_LIBRARY" subtitle is gone (redundant with the tab's own context). LIBRARY/EDIT/TAGS became one coherent pill group (`Theme.xaml`'s new `SubNavButtonStyle`): dim/transparent by default, white label + tertiary bottom-accent when selected - same visual grammar the left icon rail already used for its own selected state, just applied here too. The always-visible tag-chip row moved into a new FILTERS popup (`ClipBrowserViewModel.IsFilterPanelOpen`/`ToggleFilterPanelCommand`), which also gained a Clips-vs-Recordings segmented filter (`TypeFilter`, checked against `ClipMetadata.IsTrimmedCopy` in `FilterClip`) - lets a trimmed export be told apart from a raw replay-buffer/manual recording. **Capture folded into Settings**: the separate Capture tab is gone - nav is just Clips/Settings now. Its CAPTURE SOURCE and AUDIO SOURCES groups joined Settings' existing WrapPanel (still 340px/uniform-width, now six groups in a row instead of two-plus-four split across tabs), and Game Profiles moved down with them, unchanged in its own bounded (non-scrolled) row below the WrapPanel's ScrollViewer for the same reason it always needed one - a DataGrid's "*" row collapses to zero inside an infinite-height ScrollViewer. CONNECT (previously floating in its own row next to Start/Stop Recording) is now a centered action button inside the CONNECTION group, next to the host/port/password fields it actually connects. Start/Stop Recording and the global StatusMessage moved to the title bar (`MainWindow.xaml`'s row 0) - reachable from either tab now, same reasoning as the LIVE/BUFFER lamps already living there. **Every milestone row above that says "Capture tab"** (M7, M8, M12, M13, M14) is describing where things lived at the time they were built - that page doesn't exist anymore, its content is on Settings now; left as historical record rather than rewritten, per this doc's own convention of layering later changes as notes (see M15/M16) instead of editing old rows in place. |
-| M18 | First real-usage bug pass: per-game auto-detect resolution (fixes black-bar clips from a stretched-resolution game), click-to-seek on the Trim Editor scrub bar, click-to-pause on the video, a stray font-size fix, and app-audio source staleness/mute-scope clarity | Done - see below for detail on each. |
+| M18 | Packaging: Setup.exe installer wizard + Windows CI build, install-relative asset paths, in-app first-run setup wizard, and the bug-fix/deep-clean pass that packaging forced | Done — see below for detail. |
+| M19 | First real-usage bug pass: per-game auto-detect resolution (fixes black-bar clips from a stretched-resolution game), click-to-seek on the Trim Editor scrub bar, click-to-pause on the video, a stray font-size fix, and app-audio source staleness/mute-scope clarity | Done - see below for detail on each. |
+| M20 | In-app auto-update: a titlebar "UPDATE AVAILABLE" button that downloads and silently reinstalls over itself, and CI now cuts a release on every push to main, not just a manual tag | Done - see below for detail. |
 
 Multi-track audio recording itself (a clip's container carrying more than the old fixed
 desktop+mic pair) is the schema change underneath M8/M9: `ClipMetadata.HasMicTrack`/
@@ -151,10 +152,10 @@ once backfill had already copied their data into `AudioTracksJson`; see M15's bu
   startup from a field initializer; all three now degrade instead. (f) `ThemeManager` derived and wrote
   two brushes no XAML consumes.
 
-All of M1-M18 plus the two originally-unnumbered gaps (game profile UI, hotkey rebinding UI)
+All of M1-M20 plus the two originally-unnumbered gaps (game profile UI, hotkey rebinding UI)
 are now done. What's left is smaller polish items — see below.
 
-**M18 in detail:**
+**M19 in detail:**
 
 - **Auto-detect resolution, per game profile.** Root cause of the black-bar clips: `GameProfile.OutputWidth`/
   `OutputHeight` was always a fixed value (2560x1440 for Default), applied as both OBS's base *and* output
@@ -255,6 +256,58 @@ are now done. What's left is smaller polish items — see below.
   `TrimEditorView`'s 200ms position poll were deliberately left alone - both are already bounded (only
   active right after a save, or only while the Trim Editor tab is open), not continuous background cost.
 
+**M20 in detail:**
+
+- **Two branches of work had to be reconciled first.** M18's packaging work and M19's bug-hunt pass were
+  built independently, on separate branches, by sessions with no visibility into each other - the
+  installed app (this app's whole reason to have an updater at all) only existed because of M18, but had
+  none of M19's fixes, and vice versa. Merged before anything else here could make sense; the numbering
+  fix above (this doc previously had two different milestones both called "M18" - a merge artifact,
+  since each session picked its own next number independently) is a leftover of that.
+- **Why an in-app updater instead of just telling people to re-download.** The whole ask was "I shouldn't
+  have to think about updating" - a Setup.exe that has to be manually fetched from a Releases page every
+  time isn't that, even though M18 already made that possible.
+- **`Core/Update/UpdateChecker`** hits this repo's public GitHub Releases API anonymously (no embedded
+  credentials - the repo went public specifically to make this simple; see the "Non-goals" note below)
+  once per launch (`MainViewModel.CheckForUpdatesAsync`, called from `InitializeAsync`), compares the
+  latest release's tag (`v1.2.3` → `System.Version`) against `Assembly.GetEntryAssembly()`'s own version,
+  and - if newer - backs `IsUpdateAvailable`. That drives a new titlebar button (`MainWindow.xaml`, first
+  thing after the app label, in the one row visible from every tab, filled solid with the app's
+  Tertiary/"something notable" signal color) that's collapsed the rest of the time. Pressing it
+  (`InstallUpdateCommand`) downloads the release's `.exe` asset and hands it to
+  `UpdateChecker.RunSilentInstall`.
+- **The update mechanism is "re-run the same Setup.exe silently," not a bespoke file-replace.** M18's
+  installer already does everything correctly (fixed `AppId` upgrades an existing install in place) - a
+  separate in-place-patch code path would just be a second, less-tested way to get the same result.
+  `RunSilentInstall` launches it with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-` via
+  `UseShellExecute=true` (required, not incidental - only ShellExecute lets Windows raise the UAC prompt
+  the installer's `PrivilegesRequired=admin` manifest demands; a directly-launched process fails to
+  elevate). Two `installer/ClippingSoftware.iss` changes make this safe to fire at a running copy of
+  itself: `CloseApplications=yes` (explicit, though on by default since Inno Setup 6) uses Windows'
+  Restart Manager to detect and close the app itself once a locked file needs replacing, instead of this
+  app having to time its own exit around the installer's file-copy phase; and the `[Run]` entry's
+  `skipifsilent` flag was removed so a *silent* install also relaunches the app afterward - previously
+  that only happened for an interactive first-time install (an unchecked box otherwise), which would have
+  meant "click update" silently installed and then just... didn't come back.
+- **CI now cuts a release on every push to `main`, not only a manual `v*` tag** (`.github/workflows/
+  release.yml`) - version becomes `1.0.<run number>` (monotonically increasing, no manual bump needed)
+  instead of the csproj's static `1.0.0` fallback. The existing manual-tag flow (`INSTALL.md`'s "bump
+  the version, `git tag v1.0.1`") still works unchanged and takes priority when used, for a deliberate/
+  named release; the auto path exists specifically so "I changed something and pushed" is enough on its
+  own for `CheckForUpdatesAsync` to eventually see something newer, without anyone remembering a second
+  step.
+- **The repo went public as part of this** (a separate, explicit decision - not something to redo
+  without asking again): `UpdateChecker` needs anonymous read access to Releases, and the alternative
+  (keep it private, embed a token in the shipped exe) is worse practice - a credential baked into a
+  distributed binary can be extracted by anyone who has the file. Checked thoroughly before flipping
+  visibility: no passwords/keys/tokens anywhere in the full history across every branch (the
+  `ObsWebsocketPassword` empty-by-default design has been there since the very first commit, with a
+  comment saying as much), and the one personal detail that *was* in there - the original commit's
+  author email - was scrubbed via a full-history rewrite (`git filter-repo`) before the repo went public,
+  since a public repo exposes history, not just current file contents. That rewrite changed every commit
+  hash on every branch; if a checkout of this repo predates it, `git pull` will refuse - `git fetch` +
+  `git reset --hard origin/<branch>` (or a fresh clone) is expected, not a sign anything's wrong.
+
 - **Visual identity pass.** The app moved from an early tally-lamp red/green/amber palette to a
   strict 4-family system (Primary white / Secondary black / Tertiary pale-lavender signal color /
   Neutral near-black ramp, plus Alert red for recording/destructive-only). Covers the whole app:
@@ -340,7 +393,7 @@ parsing, before applying - `ColorUtils.TryParseHex` itself is untouched (it's al
 
 ## Non-goals (don't add unless explicitly asked)
 
-- Config-file-based settings, auto-update. (Installers are *no longer* a non-goal - see M18.)
+- Config-file-based settings. (Installers and auto-update are *no longer* non-goals - see M18 and M20.)
 - Cloud upload/sharing of clips.
 - Support for capture backends other than OBS.
 - Automated tests as a blanket requirement — add them for genuinely tricky logic (e.g.

@@ -129,6 +129,30 @@
                 <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
                     <TextBlock Text="CLIP-SYS // CTRL-DECK" Style="{StaticResource EyebrowTextStyle}" FontWeight="Bold" VerticalAlignment="Center"/>
                 </StackPanel>
+
+                <!-- Update available (MainViewModel.CheckForUpdatesAsync/InstallUpdateCommand): collapsed
+                     until IsUpdateAvailable flips true (checked once on every launch), then this is the
+                     first thing after the app label in a titlebar that's visible from every tab -
+                     deliberately the loudest thing in an otherwise flat/monochrome UI so it can't be
+                     missed. Pressing it downloads the update and silently reinstalls over this copy,
+                     which relaunches the app automatically once done (see installer/ClippingSoftware.iss). -->
+                <Button DockPanel.Dock="Left" Content="UPDATE AVAILABLE - CLICK TO INSTALL"
+                        Command="{Binding InstallUpdateCommand}" Margin="20,0,0,0" Padding="10,4"
+                        VerticalAlignment="Center" Background="{DynamicResource TertiaryBrush}"
+                        Foreground="{DynamicResource SecondaryBrush}" FontWeight="Bold" BorderThickness="0"
+                        WindowChrome.IsHitTestVisibleInChrome="True">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsUpdateAvailable}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+
                 <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Margin="24,0,0,0" VerticalAlignment="Center">
                     <Ellipse Width="10" Height="10" Style="{StaticResource TallyLampStyle}"/>
                     <TextBlock Style="{StaticResource TallyLabelTextStyle}" Margin="8,0,0,0" VerticalAlignment="Center"/>

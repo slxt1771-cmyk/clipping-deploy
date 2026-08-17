@@ -41,6 +41,14 @@ OutputBaseFilename=ClippingSoftware-Setup-{#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+; In-app auto-update (MainViewModel.InstallUpdateCommand) re-runs this same Setup.exe silently over an
+; already-running install - CloseApplications (on by default since Inno Setup 6, set explicitly here so
+; it doesn't depend on that default) uses Windows' Restart Manager to detect and close the app itself when
+; a locked file needs replacing, so the update doesn't need its own "wait for the old process to exit"
+; logic. RestartApplications is off: relaunching is handled by the [Run] entry below instead, which is
+; simpler than relying on RegisterApplicationRestart plumbing this app doesn't implement.
+CloseApplications=yes
+RestartApplications=no
 ; x64 only: the app publishes as win-x64 self-contained, and OBS itself is 64-bit.
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -73,7 +81,11 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: deskto
 Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: startupicon
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
+; skipifsilent deliberately removed: the in-app auto-updater runs this installer with /VERYSILENT, and
+; without relaunching afterward the app just wouldn't come back on its own once an update finished -
+; "click update, it updates right away" (the actual ask) needs this to fire in silent mode too, not just
+; the interactive first-time-install case the checkbox on the finish page covers.
+Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait postinstall
 
 [UninstallDelete]
 ; Files the app writes next to itself at runtime would otherwise be left behind and block the
