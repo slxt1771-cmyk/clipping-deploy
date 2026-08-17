@@ -27,7 +27,7 @@ changes; treat it as living, not historical.
 | M15 | Nav moved to a left icon rail with Clips as the default tab, runtime Primary/Secondary accent-color customization, and the custom titlebar M14 deliberately deferred | Done - see below for detail on each. |
 | M16 | Tab restructure (Clips/Capture/Settings, in that order), Capture-vs-everything-else split, embedded per-clip editor with autosaved drafts, a simple multi-clip Sequence editor, and a layout/centering pass on Capture+Settings | Done - see below for detail on each. |
 | M17 | Page-by-page polish pass: Clips header reflow + a Filters popup, and folding Capture back into Settings | Done. **Clips**: the title row (`ClipBrowserView.xaml`) now right-docks SEARCH/FILTERS/REFRESH in line with "CLIP-SYS // CL-001" instead of a separate row below it, and the "MODULE_ID: CLIP_LIBRARY" subtitle is gone (redundant with the tab's own context). LIBRARY/EDIT/TAGS became one coherent pill group (`Theme.xaml`'s new `SubNavButtonStyle`): dim/transparent by default, white label + tertiary bottom-accent when selected - same visual grammar the left icon rail already used for its own selected state, just applied here too. The always-visible tag-chip row moved into a new FILTERS popup (`ClipBrowserViewModel.IsFilterPanelOpen`/`ToggleFilterPanelCommand`), which also gained a Clips-vs-Recordings segmented filter (`TypeFilter`, checked against `ClipMetadata.IsTrimmedCopy` in `FilterClip`) - lets a trimmed export be told apart from a raw replay-buffer/manual recording. **Capture folded into Settings**: the separate Capture tab is gone - nav is just Clips/Settings now. Its CAPTURE SOURCE and AUDIO SOURCES groups joined Settings' existing WrapPanel (still 340px/uniform-width, now six groups in a row instead of two-plus-four split across tabs), and Game Profiles moved down with them, unchanged in its own bounded (non-scrolled) row below the WrapPanel's ScrollViewer for the same reason it always needed one - a DataGrid's "*" row collapses to zero inside an infinite-height ScrollViewer. CONNECT (previously floating in its own row next to Start/Stop Recording) is now a centered action button inside the CONNECTION group, next to the host/port/password fields it actually connects. Start/Stop Recording and the global StatusMessage moved to the title bar (`MainWindow.xaml`'s row 0) - reachable from either tab now, same reasoning as the LIVE/BUFFER lamps already living there. **Every milestone row above that says "Capture tab"** (M7, M8, M12, M13, M14) is describing where things lived at the time they were built - that page doesn't exist anymore, its content is on Settings now; left as historical record rather than rewritten, per this doc's own convention of layering later changes as notes (see M15/M16) instead of editing old rows in place. |
-| M18 | First real-usage bug pass: per-game auto-detect resolution (fixes black-bar clips from a stretched-resolution game), click-to-seek on the Trim Editor scrub bar, click-to-pause on the video, and a stray font-size fix | Done - see below for detail on each. |
+| M18 | First real-usage bug pass: per-game auto-detect resolution (fixes black-bar clips from a stretched-resolution game), click-to-seek on the Trim Editor scrub bar, click-to-pause on the video, a stray font-size fix, and app-audio source staleness/mute-scope clarity | Done - see below for detail on each. |
 
 Multi-track audio recording itself (a clip's container carrying more than the old fixed
 desktop+mic pair) is the schema change underneath M8/M9: `ClipMetadata.HasMicTrack`/
@@ -133,6 +133,28 @@ are now done. What's left is smaller polish items — see below.
   from-code audit of every hardcoded `FontSize`/`FontFamily`/`Foreground` in the app turned up this one
   outlier; everything else was already consistent (no stray hardcoded colors/fonts found bypassing the theme
   resources).
+- **App-audio source staleness fix, reported the same session.** A per-app audio source's OBS window target
+  (`AudioSourceRecord.WindowTarget`, a `"title:class:exe"` string) was only ever set once, at add time -
+  nothing re-pointed it afterward. Spotify's window title includes the current song, so its target went
+  stale within minutes even without restarting the app, let alone across the close/reopen cycles a
+  background app like Spotify goes through constantly; `AudioSourceManager.RefreshAppSourceTargets`
+  (new) re-resolves every existing app source's target from the executable name embedded at the end of its
+  stored value against OBS's live window list, updating both the OBS input (`SetWindowCaptureTarget`) and
+  the persisted record (`AudioSourceRepository.UpdateWindowTarget`, new) whenever it's drifted. `MainViewModel`
+  runs it (plus `EnsurePresetSources`, so an app that wasn't running yet at connect time still gets
+  auto-added once it appears) on a 30s `DispatcherTimer` started/stopped alongside OBS connect/disconnect -
+  polling rather than event-driven, since a backgrounded app's window can change without ever firing a
+  foreground-change event. **Separately, and likely the bigger cause of the actual reported symptom** ("I
+  muted Spotify but I could still hear it in the clip"): muting an app's own isolated track
+  (`AudioSourceManager.SetMuted`) never removes that app from Desktop Audio - Desktop Audio is a *separate,
+  parallel* whole-system capture, so an unmuted Desktop Audio track (the default, and virtually always the
+  first/only track a normal video player opens) still carries every app's sound regardless of any per-app
+  track's mute state. That's an OBS/Windows audio-architecture reality, not a bug in `SetInputMute` wiring -
+  fixed here only by adding a `ToolTip` on the per-app MUTE checkbox explaining it and pointing at the actual
+  way to exclude an app from an export (deselect its track in the Trim Editor's AUDIO TRACKS row, per M9/M11).
+  True live isolation (so Desktop Audio itself never picks up a given app) would need routing that app's
+  output to a non-default Windows playback device - an OS-level setup step for the user, not something this
+  app's code can do on its own.
 
 - **Visual identity pass.** The app moved from an early tally-lamp red/green/amber palette to a
   strict 4-family system (Primary white / Secondary black / Tertiary pale-lavender signal color /

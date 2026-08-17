@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Windows.Threading;
 using ClippingSoftware.App.Theming;
 using ClippingSoftware.App.Views;
 using ClippingSoftware.Core.GameDetection;
@@ -32,6 +33,13 @@ public partial class MainViewModel : ObservableObject
     private readonly SoundCuePlayer _soundCuePlayer = new();
     private readonly ClipEditDraftRepository _draftRepository;
     private readonly SequenceRepository _sequenceRepository;
+
+    /// <summary>Periodically re-resolves app-audio source window targets and picks up newly-launched preset
+    /// apps (see AudioSourceManager.RefreshAppSourceTargets/EnsurePresetSources) - a backgrounded app like
+    /// Spotify can close, relaunch, or just change its window title (every song) without ever triggering a
+    /// foreground-change event, so this can't be driven off GameDetectionService's WinEvent hook the way the
+    /// Game source is. Only runs while connected (started/stopped alongside Connected/Disconnected below).</summary>
+    private readonly DispatcherTimer _audioSourceRefreshTimer = new() { Interval = TimeSpan.FromSeconds(30) };
 
     public ObsController ObsController => _obsController;
 
@@ -170,6 +178,11 @@ public partial class MainViewModel : ObservableObject
         ClipBrowser.TrimEditorRequested += OnTrimEditorRequested;
 
         _audioSourceManager.SourcesChanged += () => App.Current.Dispatcher.Invoke(RefreshAudioSources);
+        _audioSourceRefreshTimer.Tick += (_, _) =>
+        {
+            _audioSourceManager.EnsurePresetSources();
+            _audioSourceManager.RefreshAppSourceTargets();
+        };
 
         _gameDetectionService = new GameDetectionService(_gameDatabase, _gameProfileRepository);
         _profileApplier = new ProfileApplier(_obsController, _gameDetectionService);
@@ -215,6 +228,8 @@ public partial class MainViewModel : ObservableObject
                 StatusMessage = $"Failed to restore audio sources: {ex.Message}";
             }
 
+            _audioSourceRefreshTimer.Start();
+
             try
             {
                 _obsController.StartReplayBuffer();
@@ -234,6 +249,7 @@ public partial class MainViewModel : ObservableObject
             IsRecording = false;
             IsReplayBufferActive = false;
             StatusMessage = "Disconnected from OBS.";
+            _audioSourceRefreshTimer.Stop();
         });
         _obsController.RecordingStopped += path => App.Current.Dispatcher.Invoke(() =>
         {

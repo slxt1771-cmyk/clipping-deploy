@@ -262,6 +262,63 @@ public class AudioSourceManager(ObsController obsController, AudioSourceReposito
         }
     }
 
+    /// <summary>
+    /// Re-resolves every existing app-audio source's OBS window target against whatever's currently
+    /// running, keyed off the executable name embedded at the end of each source's stored WindowTarget
+    /// ("title:class:exe" - see ObsController.GetWindowOptions' doc comment). Needed because nothing else
+    /// in this class ever re-points an app source once it's added: RestoreProvisionedSources only
+    /// (re)creates a scene item that's missing entirely, it doesn't refresh one that's still there but
+    /// pointed at a window that's gone (the app was closed and relaunched as a new process/window - Spotify
+    /// especially, since its window title also changes with every song, so its stored target goes stale far
+    /// more often than just on restart). The Game source doesn't need this - it's already re-targeted on
+    /// every foreground change via SetLinkedGameTargetForProcess. Call this periodically (see MainViewModel)
+    /// rather than relying on a foreground-change event, since a backgrounded app's window can change
+    /// without one ever firing.
+    /// </summary>
+    public void RefreshAppSourceTargets()
+    {
+        if (_appSources.Count == 0)
+        {
+            return;
+        }
+
+        List<(string Label, string Value)> runningWindows;
+        try
+        {
+            runningWindows = obsController.GetWindowOptions(ObsController.WindowCaptureSourceName);
+        }
+        catch
+        {
+            return;
+        }
+
+        foreach (var record in repository.GetAll())
+        {
+            var exeName = record.WindowTarget.Split(':').LastOrDefault();
+            if (string.IsNullOrEmpty(exeName))
+            {
+                continue;
+            }
+
+            var match = runningWindows.FirstOrDefault(w => w.Value.EndsWith(":" + exeName, StringComparison.OrdinalIgnoreCase));
+            if (match.Value is null || match.Value == record.WindowTarget)
+            {
+                continue;
+            }
+
+            try
+            {
+                obsController.SetWindowCaptureTarget(record.InputName, match.Value);
+                repository.UpdateWindowTarget(record.InputName, match.Value);
+            }
+            catch
+            {
+                // Best-effort - a transient OBS call failure here just means this source stays on its
+                // previous target until the next refresh tick.
+            }
+        }
+    }
+
     private int NextFreeTrack()
     {
         var used = new HashSet<int> { 1, 2, GameTrackNumber };
