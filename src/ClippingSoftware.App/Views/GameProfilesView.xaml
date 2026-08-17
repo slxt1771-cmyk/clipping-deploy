@@ -4,8 +4,12 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:sys="clr-namespace:System;assembly=mscorlib"
+             xmlns:converters="clr-namespace:ClippingSoftware.App.Converters"
              mc:Ignorable="d"
              d:DesignHeight="600" d:DesignWidth="900">
+    <UserControl.Resources>
+        <converters:InverseBooleanConverter x:Key="InverseBooleanConverter"/>
+    </UserControl.Resources>
     <Grid Margin="16">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="300"/>
@@ -182,19 +186,26 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Output Width" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding EditOutputWidth, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Auto-Detect Resolution" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <CheckBox Grid.Row="0" Grid.Column="1" IsChecked="{Binding EditAutoDetectResolution}" Margin="0,4" VerticalAlignment="Center"
+                                  ToolTip="Use the display's current resolution at the moment this game is detected, instead of the fixed Output Width/Height below. Use this for a game run at a non-native/&quot;stretched&quot; resolution (e.g. via Nvidia Control Panel), so the OBS canvas always matches what's actually being rendered instead of leaving black bars in the clip."/>
 
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Output Height" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding EditOutputHeight, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Output Width" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding EditOutputWidth, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"
+                                 IsEnabled="{Binding EditAutoDetectResolution, Converter={StaticResource InverseBooleanConverter}}"/>
 
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Fps" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding EditFps, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Output Height" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding EditOutputHeight, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"
+                                 IsEnabled="{Binding EditAutoDetectResolution, Converter={StaticResource InverseBooleanConverter}}"/>
 
-                        <TextBlock Grid.Row="3" Grid.Column="0" Text="OBS Profile Name" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        <DockPanel Grid.Row="3" Grid.Column="1" Margin="0,4">
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Fps" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding EditFps, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="OBS Profile Name" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <DockPanel Grid.Row="4" Grid.Column="1" Margin="0,4">
                             <Button DockPanel.Dock="Right" Content="REFRESH" Padding="6,3" Margin="6,0,0,0"
                                     Command="{Binding RefreshObsProfilesCommand}"
                                     ToolTip="Reload the profile list from OBS (requires an active connection)."/>

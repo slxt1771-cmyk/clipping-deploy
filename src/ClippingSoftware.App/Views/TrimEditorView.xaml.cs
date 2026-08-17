@@ -23,6 +23,10 @@ public partial class TrimEditorView : UserControl
     private readonly DispatcherTimer _positionTimer;
     private bool _isDraggingSlider;
 
+    /// <summary>MediaElement has no IsPlaying property of its own, so Play_Click/Pause_Click/Player_Click
+    /// all track it here to know which state a plain click on the video should toggle to.</summary>
+    private bool _isPlaying;
+
     public TrimEditorView()
     {
         InitializeComponent();
@@ -56,11 +60,33 @@ public partial class TrimEditorView : UserControl
         // blank/black surface after just setting Source until playback has actually started once.
         Player.Play();
         Player.Pause();
+        _isPlaying = false;
     }
 
-    private void Play_Click(object sender, RoutedEventArgs e) => Player.Play();
+    private void Play_Click(object sender, RoutedEventArgs e)
+    {
+        Player.Play();
+        _isPlaying = true;
+    }
 
-    private void Pause_Click(object sender, RoutedEventArgs e) => Player.Pause();
+    private void Pause_Click(object sender, RoutedEventArgs e)
+    {
+        Player.Pause();
+        _isPlaying = false;
+    }
+
+    /// <summary>Click anywhere on the video to toggle play/pause, matching the common player convention.</summary>
+    private void Player_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (_isPlaying)
+        {
+            Pause_Click(sender, e);
+        }
+        else
+        {
+            Play_Click(sender, e);
+        }
+    }
 
     private void SetIn_Click(object sender, RoutedEventArgs e)
     {

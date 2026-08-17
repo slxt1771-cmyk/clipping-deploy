@@ -27,6 +27,7 @@ changes; treat it as living, not historical.
 | M15 | Nav moved to a left icon rail with Clips as the default tab, runtime Primary/Secondary accent-color customization, and the custom titlebar M14 deliberately deferred | Done - see below for detail on each. |
 | M16 | Tab restructure (Clips/Capture/Settings, in that order), Capture-vs-everything-else split, embedded per-clip editor with autosaved drafts, a simple multi-clip Sequence editor, and a layout/centering pass on Capture+Settings | Done - see below for detail on each. |
 | M17 | Page-by-page polish pass: Clips header reflow + a Filters popup, and folding Capture back into Settings | Done. **Clips**: the title row (`ClipBrowserView.xaml`) now right-docks SEARCH/FILTERS/REFRESH in line with "CLIP-SYS // CL-001" instead of a separate row below it, and the "MODULE_ID: CLIP_LIBRARY" subtitle is gone (redundant with the tab's own context). LIBRARY/EDIT/TAGS became one coherent pill group (`Theme.xaml`'s new `SubNavButtonStyle`): dim/transparent by default, white label + tertiary bottom-accent when selected - same visual grammar the left icon rail already used for its own selected state, just applied here too. The always-visible tag-chip row moved into a new FILTERS popup (`ClipBrowserViewModel.IsFilterPanelOpen`/`ToggleFilterPanelCommand`), which also gained a Clips-vs-Recordings segmented filter (`TypeFilter`, checked against `ClipMetadata.IsTrimmedCopy` in `FilterClip`) - lets a trimmed export be told apart from a raw replay-buffer/manual recording. **Capture folded into Settings**: the separate Capture tab is gone - nav is just Clips/Settings now. Its CAPTURE SOURCE and AUDIO SOURCES groups joined Settings' existing WrapPanel (still 340px/uniform-width, now six groups in a row instead of two-plus-four split across tabs), and Game Profiles moved down with them, unchanged in its own bounded (non-scrolled) row below the WrapPanel's ScrollViewer for the same reason it always needed one - a DataGrid's "*" row collapses to zero inside an infinite-height ScrollViewer. CONNECT (previously floating in its own row next to Start/Stop Recording) is now a centered action button inside the CONNECTION group, next to the host/port/password fields it actually connects. Start/Stop Recording and the global StatusMessage moved to the title bar (`MainWindow.xaml`'s row 0) - reachable from either tab now, same reasoning as the LIVE/BUFFER lamps already living there. **Every milestone row above that says "Capture tab"** (M7, M8, M12, M13, M14) is describing where things lived at the time they were built - that page doesn't exist anymore, its content is on Settings now; left as historical record rather than rewritten, per this doc's own convention of layering later changes as notes (see M15/M16) instead of editing old rows in place. |
+| M18 | First real-usage bug pass: per-game auto-detect resolution (fixes black-bar clips from a stretched-resolution game), click-to-seek on the Trim Editor scrub bar, click-to-pause on the video, and a stray font-size fix | Done - see below for detail on each. |
 
 Multi-track audio recording itself (a clip's container carrying more than the old fixed
 desktop+mic pair) is the schema change underneath M8/M9: `ClipMetadata.HasMicTrack`/
@@ -99,6 +100,39 @@ once backfill had already copied their data into `AudioTracksJson`; see M15's bu
 
 All of M1-M17 plus the two originally-unnumbered gaps (game profile UI, hotkey rebinding UI)
 are now done. What's left is smaller polish items — see below.
+
+**M18 in detail:**
+
+- **Auto-detect resolution, per game profile.** Root cause of the black-bar clips: `GameProfile.OutputWidth`/
+  `OutputHeight` was always a fixed value (2560x1440 for Default), applied as both OBS's base *and* output
+  canvas size on every heavy switch (`ProfileApplier.ApplyHeavySwitch`) - a game actually rendered at a
+  different ("stretched", e.g. via Nvidia Control Panel's resolution override) resolution gets captured at
+  that smaller/differently-shaped size but pasted onto the larger fixed canvas, leaving the unfilled canvas
+  area black. `GameProfile.AutoDetectResolution` (new bool, additive DB column) lets a profile opt out of the
+  fixed value: when set, `ProfileApplier.ResolveResolution` queries `Win32Window.GetSystemMetrics(SM_CXSCREEN/
+  SM_CYSCREEN)` (Shared - new P/Invoke) right before applying, which reflects whatever the OS currently
+  reports as the primary display's resolution *including* a Nvidia Control Panel-style override (that changes
+  the actual reported display mode, not just how the panel scales the final pixels), so the canvas always
+  matches what's actually being rendered. `RequiresHeavySwitch`'s diff was rewired through the same resolver
+  so a profile with auto-detect on still diffs correctly against one that doesn't. Manual entry (the
+  pre-existing Output Width/Height fields) is unchanged and still used when auto-detect is off - exposed as an
+  "Auto-Detect Resolution" checkbox above them in `GameProfilesView` that disables the two fields while
+  checked (`InverseBooleanConverter`, new). No multi-monitor mapping involved (deliberately - primary-display
+  `GetSystemMetrics` only), matching this app's single-machine/personal-use scope.
+- **Trim Editor scrub bar: click-to-seek.** `Slider`'s `IsMoveToPointEnabled` defaults to `false`, so a plain
+  click on the track only nudged the value by `LargeChange` via the track's repeat-buttons instead of jumping
+  to the clicked point - looked like "click seeks to the wrong spot, drag still works." Set on the app-wide
+  `Slider` style in `Theme.xaml` (not just the scrub bar) so every slider, including the per-track volume
+  sliders, gets the same click-to-jump behavior consistently.
+- **Trim Editor: click-to-pause on the video.** The `Border` hosting the `MediaElement` now has a
+  `MouseLeftButtonDown` handler (`TrimEditorView.Player_Click`) that toggles play/pause, tracked via a new
+  `_isPlaying` field since `MediaElement` doesn't expose one - same toggle the PLAY/PAUSE buttons already
+  used, now reachable by clicking the video itself.
+- **Stray font-size fix.** The titlebar's detected-game-name text (`MainWindow.xaml`) was `FontSize="12"`
+  while every other label/value in that same row (`EyebrowTextStyle`, the status-message text) is `11` - a
+  from-code audit of every hardcoded `FontSize`/`FontFamily`/`Foreground` in the app turned up this one
+  outlier; everything else was already consistent (no stray hardcoded colors/fonts found bypassing the theme
+  resources).
 
 - **Visual identity pass.** The app moved from an early tally-lamp red/green/amber palette to a
   strict 4-family system (Primary white / Secondary black / Tertiary pale-lavender signal color /

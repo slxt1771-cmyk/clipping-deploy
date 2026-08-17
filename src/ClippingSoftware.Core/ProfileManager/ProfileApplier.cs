@@ -1,6 +1,7 @@
 using ClippingSoftware.Core.GameDetection;
 using ClippingSoftware.Core.Obs;
 using ClippingSoftware.Data.Models;
+using ClippingSoftware.Shared.Interop;
 
 namespace ClippingSoftware.Core.ProfileManager;
 
@@ -70,12 +71,28 @@ public sealed class ProfileApplier : IDisposable
         ProfileApplied?.Invoke(profile, isHeavySwitch);
     }
 
-    private static bool RequiresHeavySwitch(GameProfile previous, GameProfile next) =>
-        previous.OutputWidth != next.OutputWidth ||
-        previous.OutputHeight != next.OutputHeight ||
-        previous.Fps != next.Fps ||
-        previous.ObsProfileName != next.ObsProfileName ||
-        !EncoderMatches(previous.Encoder, next.Encoder);
+    private static bool RequiresHeavySwitch(GameProfile previous, GameProfile next)
+    {
+        var (previousWidth, previousHeight) = ResolveResolution(previous);
+        var (nextWidth, nextHeight) = ResolveResolution(next);
+
+        return previousWidth != nextWidth ||
+            previousHeight != nextHeight ||
+            previous.Fps != next.Fps ||
+            previous.ObsProfileName != next.ObsProfileName ||
+            !EncoderMatches(previous.Encoder, next.Encoder);
+    }
+
+    /// <summary>
+    /// The width/height actually applied for a profile: its stored OutputWidth/OutputHeight, or - if
+    /// AutoDetectResolution is set - whatever the primary display currently reports (see
+    /// Win32Window.GetSystemMetrics doc comment). Centralized here so RequiresHeavySwitch's diff and
+    /// ApplyHeavySwitch's SetVideoSettings call always agree on what "this profile's resolution" means.
+    /// </summary>
+    private static (int Width, int Height) ResolveResolution(GameProfile profile) =>
+        profile.AutoDetectResolution
+            ? (Win32Window.GetSystemMetrics(Win32Window.SM_CXSCREEN), Win32Window.GetSystemMetrics(Win32Window.SM_CYSCREEN))
+            : (profile.OutputWidth, profile.OutputHeight);
 
     private static bool EncoderMatches(NvencSettings a, NvencSettings b) =>
         a.Codec == b.Codec &&
@@ -109,11 +126,12 @@ public sealed class ProfileApplier : IDisposable
             _obs.SetCurrentProfile(profile.ObsProfileName);
         }
 
+        var (width, height) = ResolveResolution(profile);
         _obs.SetVideoSettings(
-            baseWidth: profile.OutputWidth,
-            baseHeight: profile.OutputHeight,
-            outputWidth: profile.OutputWidth,
-            outputHeight: profile.OutputHeight,
+            baseWidth: width,
+            baseHeight: height,
+            outputWidth: width,
+            outputHeight: height,
             fpsNumerator: profile.Fps,
             fpsDenominator: 1);
 

@@ -48,6 +48,7 @@ public class Database
         AddColumnIfMissing(connection, "AppSettings", "SecondaryColorHex", "TEXT NULL");
         AddColumnIfMissing(connection, "AppSettings", "TertiaryColorHex", "TEXT NULL");
         AddColumnIfMissing(connection, "AppSettings", "QuaternaryColorHex", "TEXT NULL");
+        AddColumnIfMissing(connection, "GameProfiles", "AutoDetectResolution", "INTEGER NOT NULL DEFAULT 0");
 
         if (AddColumnIfMissing(connection, "Clips", "AudioTracksJson", "TEXT NOT NULL DEFAULT '[]'"))
         {
@@ -104,6 +105,7 @@ public class Database
                 DesktopAudioEnabled INTEGER NOT NULL,
                 OutputWidth INTEGER NOT NULL,
                 OutputHeight INTEGER NOT NULL,
+                AutoDetectResolution INTEGER NOT NULL DEFAULT 0,
                 Fps INTEGER NOT NULL,
                 ObsProfileName TEXT NOT NULL,
                 EncoderJson TEXT NOT NULL,

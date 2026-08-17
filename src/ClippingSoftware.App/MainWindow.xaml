@@ -140,7 +140,7 @@
                 <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Margin="20,0,0,0" VerticalAlignment="Center">
                     <TextBlock Text="GAME" Style="{StaticResource EyebrowTextStyle}" VerticalAlignment="Center"/>
                     <TextBlock Text="{Binding DetectedGameName}" Margin="8,0,0,0" VerticalAlignment="Center"
-                               FontFamily="{StaticResource MonoFont}" FontSize="12"/>
+                               FontFamily="{StaticResource MonoFont}" FontSize="11"/>
                 </StackPanel>
 
                 <!-- Global status line (StatusMessage is written to from every tab's actions - connect,

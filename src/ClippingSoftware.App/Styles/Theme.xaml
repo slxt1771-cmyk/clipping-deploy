@@ -721,6 +721,12 @@
          small enough to read well at both widths rather than looking oversized on a ~150px control. -->
     <Style TargetType="Slider">
         <Setter Property="Height" Value="20"/>
+        <!-- Without this, a plain click on the track only nudges the value by LargeChange instead of
+             jumping straight to the clicked position, so it looks/feels broken on a scrub bar (click to
+             seek doesn't land where you clicked, drag still works) - applied app-wide rather than just on
+             the Trim Editor's scrub bar so every Slider (including the per-source/per-track volume
+             sliders) behaves the same consistent way. -->
+        <Setter Property="IsMoveToPointEnabled" Value="True"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Slider">
