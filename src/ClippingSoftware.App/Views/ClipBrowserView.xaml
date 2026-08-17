@@ -12,6 +12,7 @@
     <UserControl.Resources>
         <converters:ThumbnailPathToImageConverter x:Key="ThumbnailPathToImageConverter"/>
         <converters:HexToBrushConverter x:Key="HexToBrushConverter"/>
+        <converters:HexToReadableForegroundConverter x:Key="HexToReadableForegroundConverter"/>
 
         <DataTemplate x:Key="ClipTileTemplate" DataType="{x:Type vm:ClipItemViewModel}">
             <!-- Tag carries the outer ClipBrowserViewModel down to the ContextMenu below: a ContextMenu
@@ -116,7 +117,7 @@
                                     <Border Background="{Binding ColorHex, Converter={StaticResource HexToBrushConverter}}"
                                             Padding="4,1" Margin="0,0,4,3">
                                         <TextBlock Text="{Binding Name}" FontSize="9" FontFamily="{StaticResource MonoFont}"
-                                                   Foreground="{StaticResource SecondaryBrush}"/>
+                                                   Foreground="{Binding ColorHex, Converter={StaticResource HexToReadableForegroundConverter}}"/>
                                     </Border>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -302,7 +303,7 @@
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding IsSelected}" Value="True">
                                                                 <Setter Property="Background" Value="{Binding ColorHex, Converter={StaticResource HexToBrushConverter}}"/>
-                                                                <Setter Property="Foreground" Value="{StaticResource SecondaryBrush}"/>
+                                                                <Setter Property="Foreground" Value="{Binding ColorHex, Converter={StaticResource HexToReadableForegroundConverter}}"/>
                                                             </DataTrigger>
                                                         </Style.Triggers>
                                                     </Style>
