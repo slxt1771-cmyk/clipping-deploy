@@ -62,12 +62,12 @@ public class GameProfileRepository
             INSERT INTO GameProfiles (
                 Id, DisplayName, ExecutableMatches, RequireFullscreenOrBorderless, CaptureMode,
                 CaptureTargetMonitorId, CaptureTargetWindow,
-                MicEnabled, DesktopAudioEnabled, OutputWidth, OutputHeight, AutoDetectResolution, Fps, ObsProfileName,
+                AudioEnabled, OutputWidth, OutputHeight, AutoDetectResolution, Fps, ObsProfileName,
                 EncoderJson, IsBuiltInDefault
             ) VALUES (
                 @Id, @DisplayName, @ExecutableMatches, @RequireFullscreenOrBorderless, @CaptureMode,
                 @CaptureTargetMonitorId, @CaptureTargetWindow,
-                @MicEnabled, @DesktopAudioEnabled, @OutputWidth, @OutputHeight, @AutoDetectResolution, @Fps, @ObsProfileName,
+                @AudioEnabled, @OutputWidth, @OutputHeight, @AutoDetectResolution, @Fps, @ObsProfileName,
                 @EncoderJson, @IsBuiltInDefault
             )
             """, GameProfileRow.FromModel(profile));
@@ -84,8 +84,7 @@ public class GameProfileRepository
                 CaptureMode = @CaptureMode,
                 CaptureTargetMonitorId = @CaptureTargetMonitorId,
                 CaptureTargetWindow = @CaptureTargetWindow,
-                MicEnabled = @MicEnabled,
-                DesktopAudioEnabled = @DesktopAudioEnabled,
+                AudioEnabled = @AudioEnabled,
                 OutputWidth = @OutputWidth,
                 OutputHeight = @OutputHeight,
                 AutoDetectResolution = @AutoDetectResolution,
@@ -124,8 +123,7 @@ public class GameProfileRepository
         ExecutableMatches = [],
         RequireFullscreenOrBorderless = false,
         CaptureMode = "DisplayCapture",
-        MicEnabled = true,
-        DesktopAudioEnabled = true,
+        AudioEnabled = true,
         OutputWidth = 2560,
         OutputHeight = 1440,
         Fps = 60,
@@ -152,8 +150,7 @@ public class GameProfileRepository
         public string CaptureMode { get; set; } = string.Empty;
         public string? CaptureTargetMonitorId { get; set; }
         public string? CaptureTargetWindow { get; set; }
-        public bool MicEnabled { get; set; }
-        public bool DesktopAudioEnabled { get; set; }
+        public bool AudioEnabled { get; set; }
         public int OutputWidth { get; set; }
         public int OutputHeight { get; set; }
         public bool AutoDetectResolution { get; set; }
@@ -171,8 +168,7 @@ public class GameProfileRepository
             CaptureMode = profile.CaptureMode,
             CaptureTargetMonitorId = profile.CaptureTargetMonitorId,
             CaptureTargetWindow = profile.CaptureTargetWindow,
-            MicEnabled = profile.MicEnabled,
-            DesktopAudioEnabled = profile.DesktopAudioEnabled,
+            AudioEnabled = profile.AudioEnabled,
             OutputWidth = profile.OutputWidth,
             OutputHeight = profile.OutputHeight,
             AutoDetectResolution = profile.AutoDetectResolution,
@@ -191,8 +187,7 @@ public class GameProfileRepository
             CaptureMode = CaptureMode,
             CaptureTargetMonitorId = CaptureTargetMonitorId,
             CaptureTargetWindow = CaptureTargetWindow,
-            MicEnabled = MicEnabled,
-            DesktopAudioEnabled = DesktopAudioEnabled,
+            AudioEnabled = AudioEnabled,
             OutputWidth = OutputWidth,
             OutputHeight = OutputHeight,
             AutoDetectResolution = AutoDetectResolution,

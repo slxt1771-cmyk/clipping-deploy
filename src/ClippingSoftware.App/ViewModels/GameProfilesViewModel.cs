@@ -71,10 +71,7 @@ public partial class GameProfilesViewModel : ObservableObject
     public ObservableCollection<CaptureOptionItem> WindowOptions { get; } = [];
 
     [ObservableProperty]
-    private bool _editMicEnabled = true;
-
-    [ObservableProperty]
-    private bool _editDesktopAudioEnabled = true;
+    private bool _editAudioEnabled = true;
 
     [ObservableProperty]
     private int _editOutputWidth;
@@ -170,8 +167,7 @@ public partial class GameProfilesViewModel : ObservableObject
         EditCaptureMode = profile.CaptureMode;
         EditCaptureTargetMonitor = MonitorOptions.FirstOrDefault(m => m.Value == profile.CaptureTargetMonitorId);
         EditCaptureTargetWindow = WindowOptions.FirstOrDefault(w => w.Value == profile.CaptureTargetWindow);
-        EditMicEnabled = profile.MicEnabled;
-        EditDesktopAudioEnabled = profile.DesktopAudioEnabled;
+        EditAudioEnabled = profile.AudioEnabled;
         EditOutputWidth = profile.OutputWidth;
         EditOutputHeight = profile.OutputHeight;
         EditAutoDetectResolution = profile.AutoDetectResolution;
@@ -261,8 +257,7 @@ public partial class GameProfilesViewModel : ObservableObject
         CaptureMode = EditCaptureMode,
         CaptureTargetMonitorId = EditCaptureTargetMonitor?.Value,
         CaptureTargetWindow = EditCaptureTargetWindow?.Value,
-        MicEnabled = EditMicEnabled,
-        DesktopAudioEnabled = EditDesktopAudioEnabled,
+        AudioEnabled = EditAudioEnabled,
         OutputWidth = EditOutputWidth,
         OutputHeight = EditOutputHeight,
         AutoDetectResolution = EditAutoDetectResolution,

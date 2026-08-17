@@ -28,8 +28,9 @@ public class GameProfile
     /// "WindowCapture"; null means leave whatever's currently set on the Window Capture source alone.</summary>
     public string? CaptureTargetWindow { get; set; }
 
-    public bool MicEnabled { get; set; } = true;
-    public bool DesktopAudioEnabled { get; set; } = true;
+    /// <summary>Single switch for every audio input this profile controls (mic + desktop audio) - there's
+    /// no per-input split; muting is all-or-nothing per profile.</summary>
+    public bool AudioEnabled { get; set; } = true;
 
     public int OutputWidth { get; set; }
     public int OutputHeight { get; set; }

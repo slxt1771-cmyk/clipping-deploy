@@ -98,7 +98,6 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Capture Mode" HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -167,11 +166,9 @@
                                 Style="{StaticResource OutlinedButtonStyle}"
                                 ToolTip="Reload the monitor/window lists from OBS (requires an active connection)."/>
 
-                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Mic Enabled" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        <CheckBox Grid.Row="4" Grid.Column="1" IsChecked="{Binding EditMicEnabled}" Margin="0,4" VerticalAlignment="Center"/>
-
-                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Desktop Audio Enabled" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        <CheckBox Grid.Row="5" Grid.Column="1" IsChecked="{Binding EditDesktopAudioEnabled}" Margin="0,4" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Audio Enabled" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <CheckBox Grid.Row="4" Grid.Column="1" IsChecked="{Binding EditAudioEnabled}" Margin="0,4" VerticalAlignment="Center"
+                                  ToolTip="Mutes/unmutes every audio input this profile controls (mic and desktop audio together) - there's no separate per-input switch."/>
                     </Grid>
                 </GroupBox>
 
