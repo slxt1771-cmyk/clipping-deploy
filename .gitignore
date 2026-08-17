@@ -11,3 +11,9 @@ app_stderr.log
 *.db-wal
 .claude/
 tools/ffmpeg/*.exe
+
+# Build/packaging output (see .github/workflows/release.yml)
+publish/
+dist/
+ffmpeg-extract/
+ffmpeg.zip

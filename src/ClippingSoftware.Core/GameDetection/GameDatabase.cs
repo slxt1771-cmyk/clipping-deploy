@@ -53,6 +53,12 @@ public class GameDatabase
         return _byExecutable.TryGetValue(fileName, out var entry) ? entry : null;
     }
 
+    /// <summary>
+    /// Returns an empty database rather than throwing for a missing or unreadable file. Game detection is a
+    /// background convenience - an unparseable curated list should degrade to "no game is ever recognized"
+    /// (everything resolves to the Default profile), not prevent the app from starting, and this type is
+    /// constructed from a MainViewModel field initializer where a throw would do exactly that.
+    /// </summary>
     private static List<KnownGameEntry> LoadEntries(string path)
     {
         if (!File.Exists(path))
@@ -60,35 +66,29 @@ public class GameDatabase
             return [];
         }
 
-        var json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize<List<KnownGameEntry>>(json, new JsonSerializerOptions
+        try
         {
-            PropertyNameCaseInsensitive = true,
-        }) ?? [];
+            var json = File.ReadAllText(path);
+            return JsonSerializer.Deserialize<List<KnownGameEntry>>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+            }) ?? [];
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
     }
 
     /// <summary>
-    /// Walks up from the app's base directory looking for assets\GameDatabase\known-games.json (handles
-    /// running from a bin\Debug\net8.0-windows\ output folder several levels below the repo root), falling
-    /// back to the known absolute repo path if that search comes up empty (e.g. a published/self-contained
-    /// deployment where the assets folder wasn't copied next to the exe).
+    /// Locates assets\GameDatabase\known-games.json beside the exe (packaged install) or at the repo root
+    /// (running from a bin output folder) - see <see cref="BundledResources"/>. Returns the expected
+    /// install-relative path when the file is missing entirely, so <see cref="LoadEntries"/> degrades to an
+    /// empty database and <see cref="SourcePath"/> still names where the file was supposed to be.
     /// </summary>
     public static string LocateKnownGamesFile()
     {
-        const string relative = "assets\\GameDatabase\\known-games.json";
-
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null)
-        {
-            var candidate = Path.Combine(dir.FullName, relative);
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-
-            dir = dir.Parent;
-        }
-
-        return @"D:\claude stuff\clipping software\assets\GameDatabase\known-games.json";
+        BundledResources.TryResolve(out var path, "assets", "GameDatabase", "known-games.json");
+        return path;
     }
 }

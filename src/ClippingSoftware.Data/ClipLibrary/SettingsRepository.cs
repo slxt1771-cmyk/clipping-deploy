@@ -32,7 +32,8 @@ public class SettingsRepository(Database database)
                 StartStopRecordingHotkeyVk, StartStopRecordingHotkeyModifiers, ReplayBufferLengthSeconds,
                 PlayClipSavedSound, PlayRecordingStartedSound, SoundCueVolumePercent,
                 PrimaryAccentHex, SecondaryAccentHex,
-                PrimaryColorHex, SecondaryColorHex, TertiaryColorHex, QuaternaryColorHex
+                PrimaryColorHex, SecondaryColorHex, TertiaryColorHex, QuaternaryColorHex,
+                HasCompletedFirstRunSetup, AutoLaunchObs
             ) VALUES (
                 1, @ObsExecutablePath, @ObsWebsocketHost, @ObsWebsocketPort, @ObsWebsocketPassword,
                 @ClipStorageFolder, @ExportStorageFolder, @DefaultGameProfileId,
@@ -40,7 +41,8 @@ public class SettingsRepository(Database database)
                 @StartStopRecordingHotkeyVk, @StartStopRecordingHotkeyModifiers, @ReplayBufferLengthSeconds,
                 @PlayClipSavedSound, @PlayRecordingStartedSound, @SoundCueVolumePercent,
                 @PrimaryAccentHex, @SecondaryAccentHex,
-                @PrimaryColorHex, @SecondaryColorHex, @TertiaryColorHex, @QuaternaryColorHex
+                @PrimaryColorHex, @SecondaryColorHex, @TertiaryColorHex, @QuaternaryColorHex,
+                @HasCompletedFirstRunSetup, @AutoLaunchObs
             )
             ON CONFLICT(Id) DO UPDATE SET
                 ObsExecutablePath = excluded.ObsExecutablePath,
@@ -63,7 +65,9 @@ public class SettingsRepository(Database database)
                 PrimaryColorHex = excluded.PrimaryColorHex,
                 SecondaryColorHex = excluded.SecondaryColorHex,
                 TertiaryColorHex = excluded.TertiaryColorHex,
-                QuaternaryColorHex = excluded.QuaternaryColorHex
+                QuaternaryColorHex = excluded.QuaternaryColorHex,
+                HasCompletedFirstRunSetup = excluded.HasCompletedFirstRunSetup,
+                AutoLaunchObs = excluded.AutoLaunchObs
             """, settings);
     }
 
@@ -90,6 +94,8 @@ public class SettingsRepository(Database database)
         public string? SecondaryColorHex { get; set; }
         public string? TertiaryColorHex { get; set; }
         public string? QuaternaryColorHex { get; set; }
+        public bool HasCompletedFirstRunSetup { get; set; }
+        public bool AutoLaunchObs { get; set; }
 
         public AppSettings ToModel() => new()
         {
@@ -114,6 +120,8 @@ public class SettingsRepository(Database database)
             SecondaryColorHex = SecondaryColorHex,
             TertiaryColorHex = TertiaryColorHex,
             QuaternaryColorHex = QuaternaryColorHex,
+            HasCompletedFirstRunSetup = HasCompletedFirstRunSetup,
+            AutoLaunchObs = AutoLaunchObs,
         };
     }
 }

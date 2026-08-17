@@ -172,8 +172,27 @@ public class RecordingIngestCoordinator : IDisposable
     private static readonly string[] AutoTagPalette =
         ["#E0665A", "#E0B15A", "#DDE05A", "#8CE05A", "#5AE0B1", "#5AB1E0", "#8C5AE0", "#E05AB1"];
 
-    private static string PickAutoTagColor(string name) =>
-        AutoTagPalette[(uint)name.GetHashCode() % AutoTagPalette.Length];
+    /// <summary>
+    /// Picks a palette slot from the game name with an inlined FNV-1a hash rather than string.GetHashCode().
+    /// GetHashCode is randomly seeded per process on .NET Core, so it would have given the same game a
+    /// different color on every app launch - which for a tag whose color is written once at creation time
+    /// means "Rust" ends up whatever color it happened to hash to on the run that first saw it, and two
+    /// machines (or two runs) disagree. FNV-1a is stable across processes and machines, which is what the
+    /// "deterministically from the game name" intent actually required.
+    /// </summary>
+    private static string PickAutoTagColor(string name)
+    {
+        const uint offsetBasis = 2166136261;
+        const uint prime = 16777619;
+
+        var hash = offsetBasis;
+        foreach (var c in name)
+        {
+            hash = (hash ^ c) * prime;
+        }
+
+        return AutoTagPalette[hash % AutoTagPalette.Length];
+    }
 
     /// <summary>
     /// Zips ffprobe's audio stream count against AudioSourceManager's current track layout (already ordered

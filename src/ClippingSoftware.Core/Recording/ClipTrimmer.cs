@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 
 namespace ClippingSoftware.Core.Recording;
@@ -80,30 +79,28 @@ public class ClipTrimmer(string? ffmpegPath = null)
 
         Directory.CreateDirectory(outputDirectory);
 
-        // The timestamp alone is only second-resolution, so trimming two segments from the same source
-        // clip (SequenceExporter does exactly this, once per segment, in a tight loop) can land in the
-        // same second and collide, silently overwriting the first segment's output - the short random
-        // suffix guarantees uniqueness regardless of timing.
-        var uniqueSuffix = Guid.NewGuid().ToString("N")[..8];
+        // The 4-char suffix is load-bearing, not decoration: the timestamp alone only has 1-second
+        // resolution, so two trims of the same source clip within the same second produce byte-identical
+        // names and the second silently overwrites the first (ffmpeg runs with -y). SequenceExporter hits
+        // exactly that - it trims every segment back-to-back into one directory, so a sequence containing
+        // two ranges from the same clip would concatenate the same segment twice and quietly drop the other.
+        var uniqueSuffix = Guid.NewGuid().ToString("N")[..4];
         var outputFileName =
-            $"{Path.GetFileNameWithoutExtension(sourceFilePath)}_trim_{DateTime.Now:yyyyMMdd_HHmmss}_{uniqueSuffix}{Path.GetExtension(sourceFilePath)}";
+            $"{Path.GetFileNameWithoutExtension(sourceFilePath)}_trim_{DateTime.Now:yyyyMMdd_HHmmss}_{uniqueSuffix}" +
+            Path.GetExtension(sourceFilePath);
         var outputPath = Path.Combine(outputDirectory, outputFileName);
 
         var duration = end - start;
         var startSeconds = start.TotalSeconds.ToString(CultureInfo.InvariantCulture);
         var durationSeconds = duration.TotalSeconds.ToString(CultureInfo.InvariantCulture);
 
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = _ffmpegPath,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        startInfo.ArgumentList.Add("-y");
-        startInfo.ArgumentList.Add("-v");
-        startInfo.ArgumentList.Add("error");
+        // Built up front into a plain list, then handed to FfmpegProcess - the argument construction
+        // below branches enough (legacy vs. explicit track selection, filter vs. straight map,
+        // copy vs. re-encode) that assembling it inline inside a callback would obscure it.
+        var args = new List<string>();
+        args.Add("-y");
+        args.Add("-v");
+        args.Add("error");
 
         // Input-side -ss: always placed before this input's own -i, regardless of frameAccurate.
         // For stream copy this only seeks to the nearest preceding keyframe (no decode pass exists
@@ -113,11 +110,11 @@ public class ClipTrimmer(string? ffmpegPath = null)
         // input side (vs. after all -i's as an output option) also avoids it silently binding to
         // whichever -i comes next once the extra audio-track inputs below are added - see class
         // doc comment.
-        startInfo.ArgumentList.Add("-ss");
-        startInfo.ArgumentList.Add(startSeconds);
+        args.Add("-ss");
+        args.Add(startSeconds);
 
-        startInfo.ArgumentList.Add("-i");
-        startInfo.ArgumentList.Add(sourceFilePath);
+        args.Add("-i");
+        args.Add(sourceFilePath);
 
         // Extra inputs for tracks that were extracted to their own file - same input-side -ss
         // reasoning as the main source above.
@@ -131,39 +128,39 @@ public class ClipTrimmer(string? ffmpegPath = null)
         foreach (var path in extraInputPaths)
         {
             inputIndexByFilePath[path] = 1 + inputIndexByFilePath.Count;
-            startInfo.ArgumentList.Add("-ss");
-            startInfo.ArgumentList.Add(startSeconds);
-            startInfo.ArgumentList.Add("-i");
-            startInfo.ArgumentList.Add(path);
+            args.Add("-ss");
+            args.Add(startSeconds);
+            args.Add("-i");
+            args.Add(path);
         }
 
-        startInfo.ArgumentList.Add("-t");
-        startInfo.ArgumentList.Add(durationSeconds);
+        args.Add("-t");
+        args.Add(durationSeconds);
 
         if (audioTracks is null)
         {
             // Legacy path: no explicit track selection, ffmpeg keeps every stream from the source as-is.
             if (frameAccurate)
             {
-                startInfo.ArgumentList.Add("-c:v");
-                startInfo.ArgumentList.Add("libx264");
-                startInfo.ArgumentList.Add("-preset");
-                startInfo.ArgumentList.Add("veryfast");
-                startInfo.ArgumentList.Add("-crf");
-                startInfo.ArgumentList.Add("18");
-                startInfo.ArgumentList.Add("-c:a");
-                startInfo.ArgumentList.Add("aac");
+                args.Add("-c:v");
+                args.Add("libx264");
+                args.Add("-preset");
+                args.Add("veryfast");
+                args.Add("-crf");
+                args.Add("18");
+                args.Add("-c:a");
+                args.Add("aac");
             }
             else
             {
-                startInfo.ArgumentList.Add("-c");
-                startInfo.ArgumentList.Add("copy");
+                args.Add("-c");
+                args.Add("copy");
             }
         }
         else
         {
-            startInfo.ArgumentList.Add("-map");
-            startInfo.ArgumentList.Add("0:v:0");
+            args.Add("-map");
+            args.Add("0:v:0");
 
             string Specifier(AudioTrackExportSelection track) => track.FilePath is null
                 ? $"0:a:{track.StreamIndex}"
@@ -187,70 +184,59 @@ public class ClipTrimmer(string? ffmpegPath = null)
                     filterComplex = $"{legs}{mixInputs}amix=inputs={audioTracks.Count}:duration=longest[aout]";
                 }
 
-                startInfo.ArgumentList.Add("-filter_complex");
-                startInfo.ArgumentList.Add(filterComplex);
-                startInfo.ArgumentList.Add("-map");
-                startInfo.ArgumentList.Add("[aout]");
+                args.Add("-filter_complex");
+                args.Add(filterComplex);
+                args.Add("-map");
+                args.Add("[aout]");
             }
             else if (audioTracks.Count == 1)
             {
-                startInfo.ArgumentList.Add("-map");
-                startInfo.ArgumentList.Add(Specifier(audioTracks[0]));
+                args.Add("-map");
+                args.Add(Specifier(audioTracks[0]));
             }
             // Count == 0: no audio map at all - silent export, which is a valid ffmpeg output.
 
-            startInfo.ArgumentList.Add("-c:v");
-            startInfo.ArgumentList.Add(frameAccurate ? "libx264" : "copy");
+            args.Add("-c:v");
+            args.Add(frameAccurate ? "libx264" : "copy");
             if (frameAccurate)
             {
-                startInfo.ArgumentList.Add("-preset");
-                startInfo.ArgumentList.Add("veryfast");
-                startInfo.ArgumentList.Add("-crf");
-                startInfo.ArgumentList.Add("18");
+                args.Add("-preset");
+                args.Add("veryfast");
+                args.Add("-crf");
+                args.Add("18");
             }
 
             if (audioTracks.Count > 0)
             {
-                startInfo.ArgumentList.Add("-c:a");
+                args.Add("-c:a");
                 // A single mapped stream at full volume can still stream-copy when the fast path is
                 // selected; a filter (volume adjust or mix) always needs the decode pass it already
                 // requires, and frame-accurate mode re-encodes audio too for output consistency with
                 // the re-encoded video, so neither is ever copy-able.
-                startInfo.ArgumentList.Add(needsFilter || frameAccurate ? "aac" : "copy");
+                args.Add(needsFilter || frameAccurate ? "aac" : "copy");
             }
         }
 
         // Without this, seeking from a non-zero start can leave small negative timestamps around
         // the cut point on some containers, which confuses players' seek bars and duration
         // readouts even though the frames themselves are intact.
-        startInfo.ArgumentList.Add("-avoid_negative_ts");
-        startInfo.ArgumentList.Add("make_zero");
-        startInfo.ArgumentList.Add(outputPath);
+        args.Add("-avoid_negative_ts");
+        args.Add("make_zero");
+        args.Add(outputPath);
 
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Failed to start ffmpeg.");
-
-        // If cancellation (or a stream-read failure) throws out of the awaits below, Dispose() alone
-        // wouldn't stop the still-running ffmpeg process - it only releases the .NET wrapper, not the OS
-        // process - leaving it to keep running/writing outputPath in the background indefinitely. The
-        // finally below only fires Kill when the process is confirmed still running, so the normal
-        // success path (already exited by the time WaitForExitAsync returns) is unaffected.
-        try
+        var (exitCode, stderr) = await FfmpegProcess.RunAsync(_ffmpegPath, list =>
         {
-            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken);
-            var stderr = await stderrTask;
-
-            if (process.ExitCode != 0 || !File.Exists(outputPath))
+            foreach (var arg in args)
             {
-                throw new InvalidOperationException($"ffmpeg trim failed (exit {process.ExitCode}): {stderr}");
+                list.Add(arg);
             }
+        }, cancellationToken);
 
-            return outputPath;
-        }
-        finally
+        if (exitCode != 0 || !File.Exists(outputPath))
         {
-            ProcessCleanup.KillIfRunning(process);
+            throw new InvalidOperationException($"ffmpeg trim failed (exit {exitCode}): {stderr}");
         }
+
+        return outputPath;
     }
 }

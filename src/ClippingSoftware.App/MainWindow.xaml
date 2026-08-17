@@ -426,6 +426,8 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="110"/>
@@ -435,13 +437,22 @@
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="Clip Folder" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding ClipStorageFolder, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
 
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Save Replay" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                            <controls:HotkeyCaptureBox Grid.Row="1" Grid.Column="1" HorizontalAlignment="Left" Margin="0,4"
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Clip Length (s)" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ReplayBufferLengthSeconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+
+                            <!-- OBS only reads the buffer length when the replay-buffer output starts, so a
+                                 change here takes effect on the next reconnect rather than immediately. -->
+                            <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Margin="0,0,0,6" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource DimBrush}" FontSize="11"
+                                       Text="How many seconds a saved clip covers. Applies on the next OBS reconnect."/>
+
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Save Replay" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <controls:HotkeyCaptureBox Grid.Row="3" Grid.Column="1" HorizontalAlignment="Left" Margin="0,4"
                                                         VirtualKey="{Binding ReplayBufferSaveHotkeyVk, Mode=TwoWay}"
                                                         Modifiers="{Binding ReplayBufferSaveHotkeyModifiers, Mode=TwoWay}"/>
 
-                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Start/Stop Rec" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                            <controls:HotkeyCaptureBox Grid.Row="2" Grid.Column="1" HorizontalAlignment="Left" Margin="0,4"
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Start/Stop Rec" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <controls:HotkeyCaptureBox Grid.Row="4" Grid.Column="1" HorizontalAlignment="Left" Margin="0,4"
                                                         VirtualKey="{Binding StartStopRecordingHotkeyVk, Mode=TwoWay}"
                                                         Modifiers="{Binding StartStopRecordingHotkeyModifiers, Mode=TwoWay}"/>
                         </Grid>

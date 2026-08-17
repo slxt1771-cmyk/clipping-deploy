@@ -66,6 +66,38 @@ public class ObsController : IDisposable
 
     public string GetRecordDirectory() => _obs.GetRecordDirectory();
 
+    /// <summary>
+    /// Points OBS's recording output at a directory, creating it if needed. Without this the app's
+    /// "clip storage folder" setting was purely decorative - it was persisted and displayed, but OBS kept
+    /// writing wherever it was configured, so recordings landed somewhere the user was never shown.
+    ///
+    /// Sent as a raw request: SetRecordDirectory arrived in obs-websocket 5.1 (OBS 30) and isn't in the
+    /// typed surface of the 5.0 SDK this project references. An older OBS rejects it, which the caller
+    /// treats as non-fatal - recording still works, it just uses OBS's own directory.
+    /// </summary>
+    public void SetRecordDirectory(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        SendRawRequest("SetRecordDirectory", new JObject { ["recordDirectory"] = directory });
+    }
+
+    /// <summary>
+    /// Sets how much history the replay buffer keeps, i.e. how long a saved clip is. This is the whole
+    /// premise of the app ("save the last N seconds"), and N previously never reached OBS at all - the
+    /// setting existed in the database and nothing ever read it.
+    ///
+    /// Written to both output modes' profile parameters because OBS only honours the one matching its
+    /// current Output/Mode, and which mode a given install is in isn't something this app sets. Writing
+    /// the inactive one is harmless. OBS reads this when the buffer output *starts*, so callers must
+    /// apply it before StartReplayBuffer rather than expecting a running buffer to pick it up.
+    /// </summary>
+    public void SetReplayBufferSeconds(int seconds)
+    {
+        var value = Math.Max(1, seconds).ToString();
+        SetProfileParameter("AdvOut", "RecRBTime", value);
+        SetProfileParameter("SimpleOutput", "RecRBTime", value);
+    }
+
     public List<string> GetSceneItemSourceNames(string sceneName)
         => _obs.GetSceneItemList(sceneName).Select(item => item.SourceName).ToList();
 
@@ -276,9 +308,22 @@ public class ObsController : IDisposable
     /// </summary>
     public void SetCurrentProfile(string profileName) => _obs.SetCurrentProfile(profileName);
 
+    /// <summary>
+    /// Disconnects, tolerating a controller that never connected in the first place - the setup wizard's
+    /// connection test disposes a probe instance whether or not the connection attempt succeeded, and a
+    /// throw out of a `using` there would replace a "couldn't connect" message with a crash.
+    /// </summary>
     public void Dispose()
     {
-        _obs.Disconnect();
+        try
+        {
+            _obs.Disconnect();
+        }
+        catch
+        {
+            // Already disconnected / never connected / socket already torn down - nothing to clean up.
+        }
+
         GC.SuppressFinalize(this);
     }
 
