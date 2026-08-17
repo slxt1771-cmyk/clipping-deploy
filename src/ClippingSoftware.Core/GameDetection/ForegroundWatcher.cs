@@ -6,12 +6,17 @@ namespace ClippingSoftware.Core.GameDetection;
 
 /// <summary>
 /// Watches for foreground-window changes using SetWinEventHook(EVENT_SYSTEM_FOREGROUND) on a dedicated
-/// message-pump thread, with a ~1s poll-loop fallback (belt-and-suspenders, per the architecture plan) in
-/// case the hook misses an event or fails to install (e.g. under certain security/session contexts).
+/// message-pump thread, with a poll-loop fallback (belt-and-suspenders, per the architecture plan) in case
+/// the hook misses an event or fails to install (e.g. under certain security/session contexts). The hook is
+/// the real detection path and costs nothing while idle (it's asleep in GetMessage until Windows actually
+/// posts an event); the poll is only a safety net for the hook failing, not the primary signal, so it
+/// doesn't need to be fast - a several-second detection lag from the fallback alone is unnoticeable for
+/// game-profile switching, and this app's whole point is staying out of a game's way, so this runs forever
+/// for the life of the app and should cost as little steady-state CPU as the fallback role allows.
 /// </summary>
 public sealed class ForegroundWatcher : IDisposable
 {
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
 
     // Rooted for the lifetime of the watcher so the GC never collects the delegate while native code
     // still holds a pointer to it (a classic SetWinEventHook pitfall).
@@ -54,6 +59,11 @@ public sealed class ForegroundWatcher : IDisposable
             {
                 IsBackground = true,
                 Name = "ForegroundWatcher-WinEventHook",
+                // Lets the OS scheduler favor a running game over this thread whenever the CPU is actually
+                // contended - this thread spends nearly all its life blocked in GetMessage waiting for a
+                // foreground-change event, so the lower priority only matters (and only costs anything)
+                // under real contention, which is exactly when it should yield.
+                Priority = ThreadPriority.BelowNormal,
             };
             _hookThread.SetApartmentState(ApartmentState.STA);
             _hookThread.Start();
