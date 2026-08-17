@@ -190,6 +190,17 @@ are now done. What's left is smaller polish items — see below.
   - Reviewed and found no confident bugs in: the Data layer (every repository/migration/JSON round-trip),
     `ObsController`, `ObsProcessManager`, `GameDetectionService`, `GlobalHotkeyService`, `SoundCuePlayer`,
     and the rest of the App layer's converters/theming/tray-icon code.
+- **Lightweight-while-gaming pass, requested the same session.** The app's stated goal is staying out of a
+  game's way, so this trims steady-state background cost rather than adding a feature: the audio-source
+  refresh timer (added earlier this session) moved off the UI thread (`System.Threading.Timer` instead of
+  `DispatcherTimer` - it only reaches the UI indirectly via the already-dispatcher-marshaled
+  `SourcesChanged` event) and its interval stretched 30s -> 3 minutes, since none of what it fixes is
+  time-critical; `ForegroundWatcher`'s poll-loop fallback (the WinEvent hook is the real, cost-free-while-
+  idle detection path - the poll only exists in case the hook itself fails) slowed 1s -> 5s; and
+  `ForegroundWatcher`'s dedicated hook thread now runs at `ThreadPriority.BelowNormal` so the OS scheduler
+  favors a running game over it under real CPU contention. `ClipIngestWatcher`'s 500ms poll and
+  `TrimEditorView`'s 200ms position poll were deliberately left alone - both are already bounded (only
+  active right after a save, or only while the Trim Editor tab is open), not continuous background cost.
 
 - **Visual identity pass.** The app moved from an early tally-lamp red/green/amber palette to a
   strict 4-family system (Primary white / Secondary black / Tertiary pale-lavender signal color /
