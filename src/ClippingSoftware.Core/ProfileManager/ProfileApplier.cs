@@ -9,8 +9,8 @@ namespace ClippingSoftware.Core.ProfileManager;
 /// Subscribes to GameDetectionService.DetectedGameChanged and diffs the incoming GameProfile against the
 /// currently-applied one, implementing the plan's light-switch vs heavy-switch logic:
 ///
-///   Light switch (capture mode / mic-enabled / desktop-audio-enabled differ only): mute/unmute the
-///   relevant OBS audio inputs directly - no output interruption.
+///   Light switch (capture mode / audio-enabled differ only): mute/unmute the relevant OBS audio inputs
+///   directly - no output interruption.
 ///
 ///   Heavy switch (resolution / fps / OBS profile / encoder settings differ): obs-websocket rejects
 ///   SetVideoSettings/SetCurrentProfile while an output is running, so if the replay buffer is active this
@@ -158,8 +158,8 @@ public sealed class ProfileApplier : IDisposable
 
     private void ApplyAudioMuteState(GameProfile profile)
     {
-        TrySetMute("Desktop Audio", !profile.DesktopAudioEnabled);
-        TrySetMute("Mic/Aux", !profile.MicEnabled);
+        TrySetMute("Desktop Audio", !profile.AudioEnabled);
+        TrySetMute("Mic/Aux", !profile.AudioEnabled);
     }
 
     /// <summary>
