@@ -8,10 +8,15 @@ A Windows desktop app (WPF, .NET 8) that wraps OBS Studio to give a game-clip-re
 workflow similar to NVIDIA ShadowPlay / Medal: always-on replay buffer, a global save-clip
 hotkey, automatic per-game OBS profile switching, and a local clip library.
 
-Single-machine, personal-use tool — not distributed, no installer, no telemetry. Some
-defaults in code (OBS paths, websocket password, repo-absolute fallback paths) are
-intentionally hardcoded for this one dev machine. Don't "harden" those into config/env
-lookups unless asked; that's deliberate, not an oversight.
+Personal-use tool, no telemetry — but it *is* packaged and distributed now: `installer/` builds a
+Setup.exe wizard and `.github/workflows/release.yml` produces it on every push (see `INSTALL.md`).
+
+This changed a rule that used to hold: paths are no longer hardcoded to one dev machine. Bundled
+content (`assets/`, `tools/ffmpeg/`) resolves through `Core/BundledResources.cs` — beside the exe in an
+install, walking up to the repo root when running from `bin/` — and user data defaults under
+`Videos\ClippingSoftware` and `%LocalAppData%\ClippingSoftware`. Don't reintroduce absolute machine
+paths; an installed copy has no repo above it to walk up to. The websocket password stays empty in
+source (the repo is public); the first-run wizard collects it per machine.
 
 ## Solution layout
 
@@ -96,12 +101,19 @@ Project reference graph: `App -> Core, Data, Shared` · `Core -> Data, Shared` �
 
 ## Build / run
 
-No test project exists yet. Build via the solution:
+No test project exists yet, and WPF only builds on Windows — `.github/workflows/release.yml`
+(windows-latest) is therefore the real build check as well as the installer producer. Build via the
+solution:
 
 ```
 dotnet build "ClippingSoftware.sln"
 dotnet run --project src/ClippingSoftware.App
 ```
+
+`tools/ffmpeg/*.exe` is gitignored, so a fresh clone has no ffmpeg — the build still succeeds (the
+csproj glob is allowed to match nothing) but clip ingest/trim/thumbnail will fail until you drop
+`ffmpeg.exe`/`ffprobe.exe` in there. The first-run wizard reports this rather than failing silently.
+For packaging the app locally, see `INSTALL.md`.
 
 Requires OBS Studio installed with obs-websocket enabled (bundled in OBS 28+), matching the
 host/port/password in Settings (defaults target `localhost:4455`). The app launches OBS

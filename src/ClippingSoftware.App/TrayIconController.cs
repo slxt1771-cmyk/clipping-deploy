@@ -83,13 +83,30 @@ public class TrayIconController : IDisposable
 
     /// <summary>
     /// Loads Assets/tray.ico from the app's output directory (added to the csproj with
-    /// CopyToOutputDirectory). A placeholder icon — swap the file for real artwork later; no code
-    /// change needed since the path is fixed.
+    /// CopyToOutputDirectory). Swap the file for different artwork; no code change needed since the path
+    /// is fixed.
+    ///
+    /// Falls back to the stock application icon if the file is missing or unreadable: this runs during
+    /// OnStartup, and System.Drawing.Icon throws on a missing path, so a damaged install would otherwise
+    /// fail to launch at all over a decorative icon.
     /// </summary>
     private static System.Drawing.Icon LoadTrayIcon()
     {
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "tray.ico");
-        return new System.Drawing.Icon(iconPath);
+
+        try
+        {
+            if (File.Exists(iconPath))
+            {
+                return new System.Drawing.Icon(iconPath);
+            }
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException)
+        {
+            // Corrupt/unreadable .ico - fall through to the stock icon below.
+        }
+
+        return System.Drawing.SystemIcons.Application;
     }
 
     public void Dispose()

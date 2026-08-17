@@ -49,6 +49,13 @@ public class Database
         AddColumnIfMissing(connection, "AppSettings", "TertiaryColorHex", "TEXT NULL");
         AddColumnIfMissing(connection, "AppSettings", "QuaternaryColorHex", "TEXT NULL");
         AddColumnIfMissing(connection, "GameProfiles", "AutoDetectResolution", "INTEGER NOT NULL DEFAULT 0");
+        // First-run setup wizard state. Defaulting HasCompletedFirstRunSetup to 1 for a *pre-existing*
+        // row is deliberate and is why this isn't just "DEFAULT 0": an install that predates the wizard
+        // has already been configured by hand, so re-running setup on it would be a pointless
+        // interrogation about settings that are demonstrably already working. A fresh install has no row
+        // at all, so it gets the model's own `false` default and does see the wizard.
+        AddColumnIfMissing(connection, "AppSettings", "HasCompletedFirstRunSetup", "INTEGER NOT NULL DEFAULT 1");
+        AddColumnIfMissing(connection, "AppSettings", "AutoLaunchObs", "INTEGER NOT NULL DEFAULT 1");
 
         if (AddColumnIfMissing(connection, "Clips", "AudioTracksJson", "TEXT NOT NULL DEFAULT '[]'"))
         {
@@ -90,7 +97,9 @@ public class Database
                 PrimaryColorHex TEXT NULL,
                 SecondaryColorHex TEXT NULL,
                 TertiaryColorHex TEXT NULL,
-                QuaternaryColorHex TEXT NULL
+                QuaternaryColorHex TEXT NULL,
+                HasCompletedFirstRunSetup INTEGER NOT NULL DEFAULT 0,
+                AutoLaunchObs INTEGER NOT NULL DEFAULT 1
             );
 
             CREATE TABLE IF NOT EXISTS GameProfiles (

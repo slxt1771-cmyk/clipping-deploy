@@ -9,7 +9,6 @@
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="H.NotifyIcon.Wpf" Version="2.4.1" />
-    <PackageReference Include="Velopack" Version="1.2.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -18,28 +17,48 @@
     </None>
   </ItemGroup>
 
+  <!--
+    Bundled content, laid out in the build output exactly as BundledResources expects to find it beside
+    the exe: assets\... and tools\ffmpeg\... . Before this, nothing copied these out of the repo and the
+    resolvers only worked because they walked *up* from bin\Debug\ to the repo root - which no installed
+    copy can do, so a packaged build fell back to a hardcoded dev-machine path and found nothing.
+
+    None (not Content): under UseWPF, Content items are treated as loose WPF resources and get registered
+    in the app's resource manifest, which isn't what these are - they're plain files read through
+    System.IO at runtime, same as tray.ico above.
+
+    The ffmpeg glob is intentionally allowed to match nothing: tools/ffmpeg/*.exe is gitignored (the
+    binaries are ~150MB and are fetched by the release workflow, or dropped in by hand for a source
+    build), so requiring them here would break a plain `dotnet build` of a fresh clone. A build without
+    them still runs - only ffmpeg-dependent actions fail, and the setup wizard reports it up front via
+    FfmpegTools.AreAvailable.
+  -->
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)..\..\assets\**\*"
+          Link="assets\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)..\..\tools\ffmpeg\*.exe"
+          Link="tools\ffmpeg\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <ApplicationIcon>Assets\tray.ico</ApplicationIcon>
+    <AssemblyTitle>Clipping Software</AssemblyTitle>
+    <Product>Clipping Software</Product>
+    <!-- Consumed by the installer (see installer/ClippingSoftware.iss, which reads it via the build
+         workflow) so the app version and the Setup.exe version can never drift apart. -->
+    <Version>1.0.0</Version>
+    <!-- Trimming/single-file are deliberately off: WPF doesn't support trimming, and single-file would
+         bundle the whole runtime into one exe that has to unpack to temp on every launch. The installer
+         ships the folder layout instead, which is also what lets assets\ and tools\ sit beside the exe. -->
+    <PublishSingleFile>false</PublishSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
-
-  <!-- WPF normally auto-generates Main() for you; overriding it (App.xaml.cs now has an explicit one) is
-       required so VelopackApp.Build().Run() can run before anything else at startup, per Velopack's own
-       WPF integration requirements - it needs to intercept command-line args used internally during
-       install/update/uninstall before WPF (or the rest of this app) ever sees them. -->
-  <PropertyGroup>
-    <StartupObject>ClippingSoftware.App.App</StartupObject>
-  </PropertyGroup>
-
-  <!-- App.xaml must not also be treated as an ApplicationDefinition (which auto-generates a Main that
-       would conflict with the explicit one above) - it still needs to compile as a Page so its resources
-       (Theme.xaml merge, etc.) are still available. -->
-  <ItemGroup>
-    <ApplicationDefinition Remove="App.xaml" />
-    <Page Include="App.xaml" />
-  </ItemGroup>
 
 </Project>

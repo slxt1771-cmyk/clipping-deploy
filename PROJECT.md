@@ -27,8 +27,9 @@ changes; treat it as living, not historical.
 | M15 | Nav moved to a left icon rail with Clips as the default tab, runtime Primary/Secondary accent-color customization, and the custom titlebar M14 deliberately deferred | Done - see below for detail on each. |
 | M16 | Tab restructure (Clips/Capture/Settings, in that order), Capture-vs-everything-else split, embedded per-clip editor with autosaved drafts, a simple multi-clip Sequence editor, and a layout/centering pass on Capture+Settings | Done - see below for detail on each. |
 | M17 | Page-by-page polish pass: Clips header reflow + a Filters popup, and folding Capture back into Settings | Done. **Clips**: the title row (`ClipBrowserView.xaml`) now right-docks SEARCH/FILTERS/REFRESH in line with "CLIP-SYS // CL-001" instead of a separate row below it, and the "MODULE_ID: CLIP_LIBRARY" subtitle is gone (redundant with the tab's own context). LIBRARY/EDIT/TAGS became one coherent pill group (`Theme.xaml`'s new `SubNavButtonStyle`): dim/transparent by default, white label + tertiary bottom-accent when selected - same visual grammar the left icon rail already used for its own selected state, just applied here too. The always-visible tag-chip row moved into a new FILTERS popup (`ClipBrowserViewModel.IsFilterPanelOpen`/`ToggleFilterPanelCommand`), which also gained a Clips-vs-Recordings segmented filter (`TypeFilter`, checked against `ClipMetadata.IsTrimmedCopy` in `FilterClip`) - lets a trimmed export be told apart from a raw replay-buffer/manual recording. **Capture folded into Settings**: the separate Capture tab is gone - nav is just Clips/Settings now. Its CAPTURE SOURCE and AUDIO SOURCES groups joined Settings' existing WrapPanel (still 340px/uniform-width, now six groups in a row instead of two-plus-four split across tabs), and Game Profiles moved down with them, unchanged in its own bounded (non-scrolled) row below the WrapPanel's ScrollViewer for the same reason it always needed one - a DataGrid's "*" row collapses to zero inside an infinite-height ScrollViewer. CONNECT (previously floating in its own row next to Start/Stop Recording) is now a centered action button inside the CONNECTION group, next to the host/port/password fields it actually connects. Start/Stop Recording and the global StatusMessage moved to the title bar (`MainWindow.xaml`'s row 0) - reachable from either tab now, same reasoning as the LIVE/BUFFER lamps already living there. **Every milestone row above that says "Capture tab"** (M7, M8, M12, M13, M14) is describing where things lived at the time they were built - that page doesn't exist anymore, its content is on Settings now; left as historical record rather than rewritten, per this doc's own convention of layering later changes as notes (see M15/M16) instead of editing old rows in place. |
-| M18 | First real-usage bug pass: per-game auto-detect resolution (fixes black-bar clips from a stretched-resolution game), click-to-seek on the Trim Editor scrub bar, click-to-pause on the video, a stray font-size fix, and app-audio source staleness/mute-scope clarity | Done - see below for detail on each. |
-| M19 | Real installer + in-app auto-update (Velopack), reversing the earlier "no installer, no auto-update" non-goal by explicit request | Done - see below for detail. **Not verified end-to-end by the agent that built it** - no Windows machine or .NET SDK is available in that environment, so this was built from Velopack's own source/samples (cloned for ground truth rather than guessed) and verified only by careful reading plus watching the GitHub Actions build actually succeed. The first real test of the installed app/update flow happens on the user's own machine. |
+| M18 | Packaging: Setup.exe installer wizard + Windows CI build, install-relative asset paths, in-app first-run setup wizard, and the bug-fix/deep-clean pass that packaging forced | Done — see below for detail. |
+| M19 | First real-usage bug pass: per-game auto-detect resolution (fixes black-bar clips from a stretched-resolution game), click-to-seek on the Trim Editor scrub bar, click-to-pause on the video, a stray font-size fix, and app-audio source staleness/mute-scope clarity | Done - see below for detail on each. |
+| M20 | In-app auto-update: a titlebar "UPDATE AVAILABLE" button that downloads and silently reinstalls over itself, and CI now cuts a release on every push to main, not just a manual tag | Done - see below for detail. |
 
 Multi-track audio recording itself (a clip's container carrying more than the old fixed
 desktop+mic pair) is the schema change underneath M8/M9: `ClipMetadata.HasMicTrack`/
@@ -99,10 +100,62 @@ once backfill had already copied their data into `AudioTracksJson`; see M15's bu
   actually been broken. If tab content ever silently goes blank again, verify with a `PrintWindow`
   capture before trusting `System.Windows.Automation` output in this environment.
 
-All of M1-M17 plus the two originally-unnumbered gaps (game profile UI, hotkey rebinding UI)
+**M18 in detail — packaging, and the bug-fix pass that had to come with it:**
+
+- **It ships as a Setup.exe now.** `installer/ClippingSoftware.iss` (Inno Setup) produces the wizard a
+  user downloads and double-clicks: install location, Start Menu/desktop shortcuts, an optional
+  run-at-sign-in shortcut, an uninstaller, and an up-front warning if OBS Studio isn't installed.
+  `.github/workflows/release.yml` (windows-latest) builds it on every push - which doubles as this
+  repo's only real build check, since WPF can't compile anywhere else and there's no test project. It
+  publishes self-contained win-x64 (so no .NET install is required of the user), fetches a pinned ffmpeg
+  build into `tools/ffmpeg/`, verifies the published layout actually contains `assets/` and
+  `tools/ffmpeg/`, compiles the installer, and uploads it as an artifact; a `v*` tag also cuts a GitHub
+  release. See `INSTALL.md`.
+- **Paths had to stop being machine-specific first.** `FfmpegTools`, `GameDatabase` and `SoundCuePlayer`
+  each walked up from `AppContext.BaseDirectory` looking for `assets/`/`tools/` and *fell back to
+  `D:\claude stuff\clipping software\...`*. Nothing ever copied those trees into the build output, so
+  the walk-up only worked because a `bin/` folder sits under the repo root - an installed copy has no
+  repo above it and would have hit the dead fallback path on every launch. Replaced by
+  `Core/BundledResources.cs` (beside-the-exe first, then walk up, no machine fallback), with the App
+  csproj now actually copying both trees into the output. `AppSettings`' storage defaults moved to
+  `Videos\ClippingSoftware\{Recordings,Exports}`.
+- **First-run setup wizard** (`Views/SetupWindow` + `SetupViewModel`), shown once before `MainWindow`
+  exists, gated on the new `AppSettings.HasCompletedFirstRunSetup`. Four steps: install integrity check
+  (is bundled ffmpeg actually present), OBS location (auto-detected by `Core/Obs/ObsInstallLocator`,
+  correctable by Browse), obs-websocket host/port/**password** with a live Test Connection, and storage
+  folders + clip length. The password step is the one genuinely unavoidable manual task - OBS 28+
+  generates a per-machine password and enables auth by default, so a fresh install can never connect
+  until it's copied across, and no amount of packaging can bundle it. The migration deliberately marks
+  *pre-existing* installs as already set up (`DEFAULT 1` on the added column) so this machine isn't
+  re-interrogated about settings that already work.
+- **Two settings were pure decoration and are now actually applied.** `ClipStorageFolder` was persisted
+  and shown in Settings but never sent to OBS, so recordings landed wherever OBS happened to be
+  configured rather than where the UI said. Worse, `ReplayBufferLengthSeconds` - *how long a saved clip
+  is*, the entire premise of the app - was stored in the database and read by nothing at all; the buffer
+  always used whatever OBS's own profile said. Both now go through
+  `ObsController.SetRecordDirectory`/`SetReplayBufferSeconds` from
+  `MainViewModel.ApplyRecordingOutputSettings`, applied on connect *before* `StartReplayBuffer` (OBS
+  only reads them when the output starts) and again after a settings save. Clip length also gained a
+  Settings-tab field, since it previously had no UI anywhere.
+- **Other real defects fixed in the same pass.** (a) All five ffmpeg/ffprobe call sites redirected
+  stdout and then read only stderr - a full pipe buffer would have blocked the child process forever and
+  hung a clip ingest with no error and no timeout; they now share `Recording/FfmpegProcess`, which
+  drains both pipes concurrently. (b) `ClipTrimmer`'s output filename had 1-second resolution, so
+  `SequenceExporter` - which trims every segment back-to-back into one folder - would silently overwrite
+  one segment with another and concatenate the duplicate whenever a sequence used two ranges from the
+  same clip; a short unique suffix fixes it. (c) `MainViewModel.Connect` let `EnsureRunning`'s
+  `FileNotFoundException` escape, crashing the app on a button click when the OBS path was wrong - the
+  single most likely thing to be wrong on a fresh install. (d) Auto-tag colors were picked with
+  `string.GetHashCode()`, which is randomly seeded per process on .NET Core, so the "deterministic"
+  color a game got depended on which run first saw it; replaced with an inlined FNV-1a. (e) A missing
+  `tray.ico`, an unparseable `known-games.json`, or a missing sound WAV each took the app down at
+  startup from a field initializer; all three now degrade instead. (f) `ThemeManager` derived and wrote
+  two brushes no XAML consumes.
+
+All of M1-M20 plus the two originally-unnumbered gaps (game profile UI, hotkey rebinding UI)
 are now done. What's left is smaller polish items — see below.
 
-**M18 in detail:**
+**M19 in detail:**
 
 - **Auto-detect resolution, per game profile.** Root cause of the black-bar clips: `GameProfile.OutputWidth`/
   `OutputHeight` was always a fixed value (2560x1440 for Default), applied as both OBS's base *and* output
@@ -203,62 +256,57 @@ are now done. What's left is smaller polish items — see below.
   `TrimEditorView`'s 200ms position poll were deliberately left alone - both are already bounded (only
   active right after a save, or only while the Trim Editor tab is open), not continuous background cost.
 
-**M19 in detail:**
+**M20 in detail:**
 
-- **Why now.** Requested explicitly the same session, reversing the earlier "no installer, no auto-update"
-  non-goal: the app was only ever launched via `dotnet run`/an IDE from the git-cloned source, with no
-  packaging or update mechanism of any kind - "update" meant someone manually pulling and rebuilding.
-- **Library: [Velopack](https://velopack.io/)**, not a hand-rolled installer/updater. Chosen specifically
-  because it's a single package that does both halves (a real Windows installer wizard *and* in-app
-  update-checking against a plain URL/GitHub Releases feed) with a well-documented, actively maintained
-  WPF integration path - far lower risk than reinventing either half blind, especially since this was
-  built without a Windows machine to test on (see the milestone-table caveat above).
-- **App bootstrapping.** `ClippingSoftware.App.csproj` now sets `<StartupObject>ClippingSoftware.App.App
-  </StartupObject>` and remaps `App.xaml` from an `ApplicationDefinition` to a plain `Page`, so
-  `App.xaml.cs` can define its own `Main()` instead of relying on WPF's auto-generated one - required so
-  `VelopackApp.Build().Run()` runs before anything else, per Velopack's own requirement that it intercept
-  its internal install/update/uninstall command-line args before WPF (or the rest of the app) ever sees
-  them. Exact pattern (including the csproj remap) verified against Velopack's own `samples/CSharpWpf` in
-  its source repo, not guessed.
-- **Update check/download/apply**, `MainViewModel`: `_updateManager` (`Velopack.UpdateManager`, source =
-  `GithubSource` pointed at this repo) is checked once per launch (`CheckForUpdatesAsync`, called from
-  `InitializeAsync` - not polled periodically, since "open the app, see the button" is the actual
-  requirement). `IsUpdateAvailable` backs a new titlebar button (see below); pressing it
-  (`InstallUpdateCommand`) downloads the update, then raises `UpdateReadyToInstall` rather than applying it
-  directly - `UpdateManager.ApplyUpdatesAndRestart` force-exits the process itself (not through WPF's
-  normal `Application.Shutdown()`/window-`Closing` path) and its own doc comment says callers must clean
-  up state first, so `App.xaml.cs` (which already owns that cleanup precedent in `OnExit`) subscribes to
-  the event, disposes the tray icon, calls `MainViewModel.Shutdown()`, then
-  `MainViewModel.ApplyPendingUpdate()` actually terminates and relaunches the app into the new version.
-  Every step is wrapped best-effort (mirroring this codebase's existing background-path convention) so a
-  copy that isn't running from a Velopack-installed location (e.g. still just `dotnet run` in dev) silently
-  has no update button rather than throwing - `UpdateManager.CheckForUpdatesAsync` itself throws in that
-  case (`EnsureInstalled()`), which is expected, not a bug.
-  - **Note for anyone reading this to fix a bug**: `Velopack.UpdateManager.ApplyUpdatesAndRestart` takes a
-    `VelopackAsset`, not the `UpdateInfo` this class stores as `_pendingUpdate` - it compiles because
-    `UpdateInfo` has an implicit conversion operator to `VelopackAsset` (`TargetFullRelease`). Not a typo.
-- **UI**: a new titlebar button (`MainWindow.xaml`, right after the "CLIP-SYS // CTRL-DECK" label - first
-  thing after the app name, in the one row visible from every tab) reading "UPDATE AVAILABLE - CLICK TO
-  INSTALL", filled solid `TertiaryBrush`/bold `SecondaryBrush` text (the app's own "something notable"
-  signal color, same one the LIVE/BUFFER lamps use) so it's the loudest thing in an otherwise flat
-  monochrome UI - collapsed via a `DataTrigger` on `IsUpdateAvailable` until there's actually something to
-  install.
-- **CI/CD**: new `.github/workflows/release.yml`, triggered on every push to `main` (`windows-latest`
-  runner, since this can only build/publish/package on Windows). Publishes the App project
-  framework-dependent (not self-contained - smaller installer/update payloads; `vpk pack`'s
-  `-f net8-x64-desktop` tells the installer to ensure the .NET 8 desktop runtime is present instead,
-  installing it if missing), packs it with `vpk` (Velopack's CLI, pinned to the same 1.2.0 version as the
-  `Velopack` NuGet package the app references, to keep the on-disk release format and the app's own
-  understanding of it in lockstep), and publishes straight to a GitHub Release (`vpk upload github
-  --publish`) using the workflow's own default `GITHUB_TOKEN` - no extra secrets needed. Version is
-  `1.0.<run_number>`, monotonically increasing per workflow run with no manual tagging required, satisfying
-  Velopack's "each release must be a strictly higher version than the last" requirement for update
-  detection to work at all.
-- **First-time install, not just updates.** The very first copy on a machine still has to come from
-  somewhere other than the in-app button (nothing to update *from* yet) - that's the `Setup.exe` GitHub
-  Releases asset `vpk pack` produces, a real installer wizard (progress bar, install location, Start Menu/
-  Desktop shortcuts, generated uninstaller) downloaded once by hand from the repo's Releases page. Every
-  release after that, the in-app button is how it updates.
+- **Two branches of work had to be reconciled first.** M18's packaging work and M19's bug-hunt pass were
+  built independently, on separate branches, by sessions with no visibility into each other - the
+  installed app (this app's whole reason to have an updater at all) only existed because of M18, but had
+  none of M19's fixes, and vice versa. Merged before anything else here could make sense; the numbering
+  fix above (this doc previously had two different milestones both called "M18" - a merge artifact,
+  since each session picked its own next number independently) is a leftover of that.
+- **Why an in-app updater instead of just telling people to re-download.** The whole ask was "I shouldn't
+  have to think about updating" - a Setup.exe that has to be manually fetched from a Releases page every
+  time isn't that, even though M18 already made that possible.
+- **`Core/Update/UpdateChecker`** hits this repo's public GitHub Releases API anonymously (no embedded
+  credentials - the repo went public specifically to make this simple; see the "Non-goals" note below)
+  once per launch (`MainViewModel.CheckForUpdatesAsync`, called from `InitializeAsync`), compares the
+  latest release's tag (`v1.2.3` → `System.Version`) against `Assembly.GetEntryAssembly()`'s own version,
+  and - if newer - backs `IsUpdateAvailable`. That drives a new titlebar button (`MainWindow.xaml`, first
+  thing after the app label, in the one row visible from every tab, filled solid with the app's
+  Tertiary/"something notable" signal color) that's collapsed the rest of the time. Pressing it
+  (`InstallUpdateCommand`) downloads the release's `.exe` asset and hands it to
+  `UpdateChecker.RunSilentInstall`.
+- **The update mechanism is "re-run the same Setup.exe silently," not a bespoke file-replace.** M18's
+  installer already does everything correctly (fixed `AppId` upgrades an existing install in place) - a
+  separate in-place-patch code path would just be a second, less-tested way to get the same result.
+  `RunSilentInstall` launches it with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-` via
+  `UseShellExecute=true` (required, not incidental - only ShellExecute lets Windows raise the UAC prompt
+  the installer's `PrivilegesRequired=admin` manifest demands; a directly-launched process fails to
+  elevate). Two `installer/ClippingSoftware.iss` changes make this safe to fire at a running copy of
+  itself: `CloseApplications=yes` (explicit, though on by default since Inno Setup 6) uses Windows'
+  Restart Manager to detect and close the app itself once a locked file needs replacing, instead of this
+  app having to time its own exit around the installer's file-copy phase; and the `[Run]` entry's
+  `skipifsilent` flag was removed so a *silent* install also relaunches the app afterward - previously
+  that only happened for an interactive first-time install (an unchecked box otherwise), which would have
+  meant "click update" silently installed and then just... didn't come back.
+- **CI now cuts a release on every push to `main`, not only a manual `v*` tag** (`.github/workflows/
+  release.yml`) - version becomes `1.0.<run number>` (monotonically increasing, no manual bump needed)
+  instead of the csproj's static `1.0.0` fallback. The existing manual-tag flow (`INSTALL.md`'s "bump
+  the version, `git tag v1.0.1`") still works unchanged and takes priority when used, for a deliberate/
+  named release; the auto path exists specifically so "I changed something and pushed" is enough on its
+  own for `CheckForUpdatesAsync` to eventually see something newer, without anyone remembering a second
+  step.
+- **The repo went public as part of this** (a separate, explicit decision - not something to redo
+  without asking again): `UpdateChecker` needs anonymous read access to Releases, and the alternative
+  (keep it private, embed a token in the shipped exe) is worse practice - a credential baked into a
+  distributed binary can be extracted by anyone who has the file. Checked thoroughly before flipping
+  visibility: no passwords/keys/tokens anywhere in the full history across every branch (the
+  `ObsWebsocketPassword` empty-by-default design has been there since the very first commit, with a
+  comment saying as much), and the one personal detail that *was* in there - the original commit's
+  author email - was scrubbed via a full-history rewrite (`git filter-repo`) before the repo went public,
+  since a public repo exposes history, not just current file contents. That rewrite changed every commit
+  hash on every branch; if a checkout of this repo predates it, `git pull` will refuse - `git fetch` +
+  `git reset --hard origin/<branch>` (or a fresh clone) is expected, not a sign anything's wrong.
 
 - **Visual identity pass.** The app moved from an early tally-lamp red/green/amber palette to a
   strict 4-family system (Primary white / Secondary black / Tertiary pale-lavender signal color /
@@ -313,14 +361,20 @@ are now done. What's left is smaller polish items — see below.
 - **Heavy-switch profile changes cost ~1-2s of replay-buffer downtime** by design (OBS
   rejects video-settings/profile changes while an output is running). This was an accepted
   tradeoff during M5, not a bug to "fix" by finding a workaround.
-- **Hardcoded absolute paths** (`D:\claude stuff\clipping software\...` fallbacks in
-  `FfmpegTools`, `GameDatabase`, and the default `ObsExecutablePath`/`ClipStorageFolder` in
-  `AppSettings`) are deliberate for this single-machine setup, not leftover debug code.
+- ~~**Hardcoded absolute paths** are deliberate for this single-machine setup.~~ **No longer true as of
+  M18** - packaging the app made this actively wrong (an install under Program Files can't reach a
+  `D:\claude stuff\` fallback, and no other machine has that folder). Bundled content now resolves via
+  `Core/BundledResources.cs`; user data defaults under `Videos\ClippingSoftware`. Don't reintroduce
+  absolute paths.
 - **Trim exports default to stream-copy, not frame-accurate** (see `ClipTrimmer`'s doc comment) —
   a deliberate speed/simplicity default; frame-accurate re-encode is now available as an opt-in
   checkbox, not the default, for the same export-time/quality reasons.
 
 ## Suggested next work (in rough priority order)
+
+0. Sign the installer. `Setup.exe` is unsigned, so Windows SmartScreen shows an "unknown publisher"
+   warning that the user has to click through (documented in `INSTALL.md`). Fixing it needs a paid
+   code-signing certificate, which is a purchase decision, not a code change.
 
 1. General polish/refinement pass now that M1-M17 + the profile/hotkey UIs + visual identity are
    all in: UX rough edges, error-message clarity, XAML layout tightening, etc. — nothing specific
@@ -339,10 +393,7 @@ parsing, before applying - `ColorUtils.TryParseHex` itself is untouched (it's al
 
 ## Non-goals (don't add unless explicitly asked)
 
-- Multi-machine/config-file-based settings. Installer + auto-update **were** on this list until M19,
-  reversed by explicit request - see M19's detail entry. Don't re-add other multi-machine assumptions
-  (e.g. config that isn't just "whatever this one installed copy needs to update itself") without being
-  asked the same way.
+- Config-file-based settings. (Installers and auto-update are *no longer* non-goals - see M18 and M20.)
 - Cloud upload/sharing of clips.
 - Support for capture backends other than OBS.
 - Automated tests as a blanket requirement — add them for genuinely tricky logic (e.g.

@@ -2,17 +2,51 @@ namespace ClippingSoftware.Data.Models;
 
 public class AppSettings
 {
-    public string ObsExecutablePath { get; set; } = @"C:\Program Files\obs-studio\bin\64bit\obs64.exe";
+    /// <summary>
+    /// Where a default OBS install puts obs64.exe. Only a starting guess - the first-run setup wizard
+    /// probes the real location (including a 32-bit-Program-Files / custom install) and overwrites this,
+    /// and the Settings tab can correct it afterward.
+    /// </summary>
+    public string ObsExecutablePath { get; set; } = DefaultObsExecutablePath;
+
     public string ObsWebsocketHost { get; set; } = "localhost";
     public int ObsWebsocketPort { get; set; } = 4455;
-    // Empty by default, not a hardcoded real password - this repo is pushed to GitHub (see the
-    // Squirrel.Windows packaging work), so no per-machine secret can live here. Each machine's actual
-    // websocket password is set once through the Settings tab and persisted in the local (gitignored)
-    // SQLite DB, never in source.
+
+    // Empty by default, never a real password: this repo is public, so no per-machine secret can live in
+    // source. OBS 28+ generates its own websocket password and enables auth by default, so a fresh install
+    // *will* need one - the first-run setup wizard walks the user through copying it out of OBS's
+    // Tools > WebSocket Server Settings dialog. It's then persisted in the local (gitignored) SQLite DB.
     public string ObsWebsocketPassword { get; set; } = string.Empty;
-    public string ClipStorageFolder { get; set; } = @"D:\claude stuff\clipping software\Recordings";
-    public string ExportStorageFolder { get; set; } = @"D:\claude stuff\clipping software\Exports";
+
+    // Under the user's own Videos folder rather than a fixed drive/path: an installed copy runs on a
+    // machine whose drive layout this app knows nothing about, and Videos is both guaranteed to exist and
+    // where a recording tool's output is expected to land.
+    public string ClipStorageFolder { get; set; } = DefaultClipStorageFolder;
+    public string ExportStorageFolder { get; set; } = DefaultExportStorageFolder;
+
     public string? DefaultGameProfileId { get; set; }
+
+    /// <summary>
+    /// False until the first-run setup wizard has been completed (or explicitly skipped). Drives whether
+    /// the wizard is shown at startup - a stored flag rather than "is the settings row missing", since the
+    /// row is created with defaults on first load, well before the user has actually configured anything.
+    /// </summary>
+    public bool HasCompletedFirstRunSetup { get; set; }
+
+    /// <summary>Launch OBS automatically at startup (the normal always-on-recorder behavior). The wizard
+    /// exposes this so a user who prefers to start OBS themselves isn't fought with on every launch.</summary>
+    public bool AutoLaunchObs { get; set; } = true;
+
+    public static string DefaultObsExecutablePath =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            "obs-studio", "bin", "64bit", "obs64.exe");
+
+    public static string DefaultClipStorageFolder =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "ClippingSoftware", "Recordings");
+
+    public static string DefaultExportStorageFolder =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "ClippingSoftware", "Exports");
 
     // Default: Ctrl+Alt+F10. VK_F10 = 0x79, MOD_CONTROL (0x0002) | MOD_ALT (0x0001) = 0x0003.
     // See ClippingSoftware.Shared.Interop.Win32Hotkeys for the named constants these mirror.

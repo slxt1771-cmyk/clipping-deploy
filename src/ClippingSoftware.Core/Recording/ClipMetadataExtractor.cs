@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 
@@ -59,44 +58,22 @@ public class ClipMetadataExtractor(string? ffprobePath = null)
 
     private async Task<string> RunFfprobeAsync(string filePath, CancellationToken cancellationToken)
     {
-        var startInfo = new ProcessStartInfo
+        var (exitCode, stdout, stderr) = await FfmpegProcess.RunCapturingStdoutAsync(_ffprobePath, args =>
         {
-            FileName = _ffprobePath,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        startInfo.ArgumentList.Add("-v");
-        startInfo.ArgumentList.Add("error");
-        startInfo.ArgumentList.Add("-print_format");
-        startInfo.ArgumentList.Add("json");
-        startInfo.ArgumentList.Add("-show_format");
-        startInfo.ArgumentList.Add("-show_streams");
-        startInfo.ArgumentList.Add(filePath);
+            args.Add("-v");
+            args.Add("error");
+            args.Add("-print_format");
+            args.Add("json");
+            args.Add("-show_format");
+            args.Add("-show_streams");
+            args.Add(filePath);
+        }, cancellationToken);
 
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Failed to start ffprobe.");
-
-        try
+        if (exitCode != 0)
         {
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken);
-
-            var stdout = await stdoutTask;
-            var stderr = await stderrTask;
-
-            if (process.ExitCode != 0)
-            {
-                throw new InvalidOperationException($"ffprobe exited with code {process.ExitCode}: {stderr}");
-            }
-
-            return stdout;
+            throw new InvalidOperationException($"ffprobe exited with code {exitCode}: {stderr}");
         }
-        finally
-        {
-            ProcessCleanup.KillIfRunning(process);
-        }
+
+        return stdout;
     }
 }

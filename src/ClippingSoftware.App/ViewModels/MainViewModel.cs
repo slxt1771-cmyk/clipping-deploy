@@ -6,13 +6,12 @@ using ClippingSoftware.Core.Notifications;
 using ClippingSoftware.Core.Obs;
 using ClippingSoftware.Core.ProfileManager;
 using ClippingSoftware.Core.Recording;
+using ClippingSoftware.Core.Update;
 using ClippingSoftware.Data;
 using ClippingSoftware.Data.ClipLibrary;
 using ClippingSoftware.Data.Models;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Velopack;
-using Velopack.Sources;
 
 namespace ClippingSoftware.App.ViewModels;
 
@@ -51,23 +50,17 @@ public partial class MainViewModel : ObservableObject
 
     private static readonly TimeSpan AudioSourceRefreshInterval = TimeSpan.FromMinutes(3);
 
-    /// <summary>Repo self-update checks against (GitHub Releases, published by .github/workflows/release.yml
-    /// on every push to main). Null if construction itself somehow throws - every call site below treats
-    /// that the same as "no update available" rather than crashing, since update-checking must never be
-    /// able to break the app it's trying to update.</summary>
-    private readonly UpdateManager? _updateManager;
+    /// <summary>Checks this repo's public GitHub Releases for a newer version than whatever's currently
+    /// installed - see UpdateChecker's own doc comment for why that's safe to do anonymously. Repo owner/
+    /// name are hardcoded rather than configurable: there's exactly one place this app is ever published
+    /// from, same reasoning as the other single-install-target assumptions already documented in
+    /// PROJECT.md.</summary>
+    private readonly UpdateChecker _updateChecker = new("slxt1771-cmyk", "clipping-deploy");
 
-    private UpdateInfo? _pendingUpdate;
+    private AvailableUpdate? _pendingUpdate;
 
     [ObservableProperty]
     private bool _isUpdateAvailable;
-
-    /// <summary>Raised once InstallUpdateCommand has finished downloading an update and it's ready to
-    /// apply - App.xaml.cs subscribes and does the actual process-exit/relaunch, since
-    /// UpdateManager.ApplyUpdatesAndRestart force-exits the process itself (not through WPF's normal
-    /// shutdown path) and its own doc comment says callers must clean up state themselves first; App
-    /// already owns exactly that cleanup precedent in OnExit.</summary>
-    public event Action? UpdateReadyToInstall;
 
     public ObsController ObsController => _obsController;
 
@@ -100,6 +93,12 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     private string _clipStorageFolder = string.Empty;
+
+    /// <summary>How many seconds of history the replay buffer keeps, i.e. how long a saved clip is.
+    /// Applied to OBS via ApplyRecordingOutputSettings - OBS reads it when the buffer output starts, so a
+    /// change only takes hold on the next buffer restart (reconnect), not instantly.</summary>
+    [ObservableProperty]
+    private int _replayBufferLengthSeconds = 60;
 
     [ObservableProperty]
     private bool _isConnected;
@@ -199,17 +198,6 @@ public partial class MainViewModel : ObservableObject
         _draftRepository = new ClipEditDraftRepository(_database);
         _sequenceRepository = new SequenceRepository(_database);
 
-        try
-        {
-            _updateManager = new UpdateManager(new GithubSource("https://github.com/slxt1771-cmyk/clipping-deploy", null, false));
-        }
-        catch
-        {
-            // Best-effort - construction alone shouldn't throw (it doesn't touch the network or require an
-            // installed copy), but if it ever does, updates are just unavailable this session rather than
-            // taking the whole app down with them.
-        }
-
         _ingestCoordinator = new RecordingIngestCoordinator(_obsController, _clipRepository, _audioSourceManager, _tagRepository);
         var sequenceEditor = new SequenceEditorViewModel(_sequenceRepository, _clipRepository, Settings.ExportStorageFolder, _ingestCoordinator);
         ClipBrowser = new ClipBrowserViewModel(_clipRepository, _tagRepository, sequenceEditor, _ingestCoordinator);
@@ -264,6 +252,12 @@ public partial class MainViewModel : ObservableObject
             }
 
             _audioSourceRefreshTimer.Change(AudioSourceRefreshInterval, AudioSourceRefreshInterval);
+
+            // Both of these have to land before StartReplayBuffer: OBS reads the record directory and the
+            // buffer duration when the output starts, so applying them afterwards would take effect only
+            // on the next connect. Each is separately best-effort - an older OBS without SetRecordDirectory
+            // shouldn't cost us the buffer-length setting, or the replay buffer itself.
+            ApplyRecordingOutputSettings();
 
             try
             {
@@ -323,6 +317,7 @@ public partial class MainViewModel : ObservableObject
         ObsPort = Settings.ObsWebsocketPort;
         ObsPassword = Settings.ObsWebsocketPassword;
         ClipStorageFolder = Settings.ClipStorageFolder;
+        ReplayBufferLengthSeconds = Settings.ReplayBufferLengthSeconds;
         ReplayBufferSaveHotkeyVk = Settings.ReplayBufferSaveHotkeyVk;
         ReplayBufferSaveHotkeyModifiers = Settings.ReplayBufferSaveHotkeyModifiers;
         StartStopRecordingHotkeyVk = Settings.StartStopRecordingHotkeyVk;
@@ -353,8 +348,12 @@ public partial class MainViewModel : ObservableObject
         {
             var settings = _settingsRepository.Load();
             var obsWasAlreadyRunning = _processManager.IsObsRunning();
-            StatusMessage = "Launching OBS...";
-            _processManager.EnsureRunning(settings.ObsExecutablePath);
+
+            if (settings.AutoLaunchObs && !obsWasAlreadyRunning)
+            {
+                StatusMessage = "Launching OBS...";
+                _processManager.EnsureRunning(settings.ObsExecutablePath);
+            }
 
             // Give a freshly-launched OBS time to open its websocket port before the first attempt.
             await Task.Delay(obsWasAlreadyRunning ? 500 : 5000);
@@ -377,36 +376,24 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>Checked once on every launch (see InitializeAsync) - not periodically, since "open the app
-    /// and see the update button" is the actual requirement, and it's cheap enough to just check on every
-    /// startup instead of adding a recurring timer for something that only matters right after a launch.</summary>
+    /// <summary>Checked once on every launch - not periodically, since "open the app and see the update
+    /// button" is the actual requirement, and checking again mid-session wouldn't matter until the next
+    /// launch anyway (InstallUpdateCommand restarts the app once the update is applied).</summary>
     private async Task CheckForUpdatesAsync()
     {
-        if (_updateManager is null)
-        {
-            return;
-        }
-
-        try
-        {
-            _pendingUpdate = await _updateManager.CheckForUpdatesAsync();
-            IsUpdateAvailable = _pendingUpdate is not null;
-        }
-        catch
-        {
-            // Best-effort - most commonly this means the running copy wasn't installed via the Velopack
-            // installer (e.g. a dev "dotnet run" build, which has no installed version to compare against),
-            // which is expected and not worth surfacing as an error to the user.
-        }
+        var currentVersion = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version ?? new Version(1, 0, 0);
+        _pendingUpdate = await _updateChecker.CheckForUpdateAsync(currentVersion);
+        IsUpdateAvailable = _pendingUpdate is not null;
     }
 
-    /// <summary>Downloads the update found by CheckForUpdatesAsync and, once it's fully on disk, raises
-    /// UpdateReadyToInstall so App.xaml.cs can clean up and hand off to ApplyPendingUpdate - see that
-    /// event's doc comment for why the actual process-exit/relaunch happens there instead of here.</summary>
+    /// <summary>Downloads the update found by CheckForUpdatesAsync and runs its installer unattended. The
+    /// installer itself (see installer/ClippingSoftware.iss) closes this app's running process and relaunches
+    /// it once installed - this method doesn't need to orchestrate that handoff, only get the installer
+    /// downloaded and started.</summary>
     [RelayCommand]
     private async Task InstallUpdate()
     {
-        if (_updateManager is null || _pendingUpdate is null)
+        if (_pendingUpdate is null)
         {
             return;
         }
@@ -414,15 +401,11 @@ public partial class MainViewModel : ObservableObject
         try
         {
             StatusMessage = "Downloading update...";
-            await _updateManager.DownloadUpdatesAsync(_pendingUpdate, percent =>
-                // The progress callback isn't guaranteed to run on the UI thread (Velopack's own WPF
-                // sample dispatches it explicitly for the same reason), so this needs the same
-                // App.Current.Dispatcher.Invoke marshaling every other cross-thread callback in this
-                // class already uses.
-                App.Current.Dispatcher.Invoke(() => StatusMessage = $"Downloading update ({percent}%)..."));
+            var progress = new Progress<int>(percent => StatusMessage = $"Downloading update ({percent}%)...");
+            var installerPath = await _updateChecker.DownloadUpdateAsync(_pendingUpdate, progress);
 
-            StatusMessage = "Update downloaded - restarting...";
-            UpdateReadyToInstall?.Invoke();
+            StatusMessage = "Installing update - Clipping Software will restart shortly...";
+            UpdateChecker.RunSilentInstall(installerPath);
         }
         catch (Exception ex)
         {
@@ -430,17 +413,29 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>Called by App.xaml.cs (via UpdateReadyToInstall) after it's finished its own exit cleanup -
-    /// terminates this process and relaunches the updated one. Never called directly by InstallUpdate
-    /// itself; see UpdateReadyToInstall's doc comment for why.</summary>
-    public void ApplyPendingUpdate() => _updateManager?.ApplyUpdatesAndRestart(_pendingUpdate);
-
     [RelayCommand]
     private void Connect()
     {
         StatusMessage = "Connecting...";
-        _processManager.EnsureRunning(_settingsRepository.Load().ObsExecutablePath);
-        _obsController.Connect(ObsHost, ObsPort, ObsPassword);
+
+        // EnsureRunning throws FileNotFoundException when the configured OBS path is wrong, which is the
+        // single most likely thing to be wrong on a fresh install. Unhandled, that took down the whole app
+        // from a button click; surfacing it as a status message keeps the user in the Settings tab where
+        // the path they need to correct actually is.
+        try
+        {
+            var settings = _settingsRepository.Load();
+            if (settings.AutoLaunchObs)
+            {
+                _processManager.EnsureRunning(settings.ObsExecutablePath);
+            }
+
+            _obsController.Connect(ObsHost, ObsPort, ObsPassword);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Could not connect: {ex.Message}";
+        }
     }
 
     [RelayCommand(CanExecute = nameof(CanStartRecord))]
@@ -632,6 +627,46 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Pushes the two recording-output settings that live in this app's database but are enforced by OBS:
+    /// where recordings are written, and how many seconds of history the replay buffer keeps. Called on
+    /// every connect (before the buffer starts) and again after a settings save, so a change takes effect
+    /// on the next buffer restart rather than only after an app restart.
+    ///
+    /// Failures are reported but never thrown: SetRecordDirectory needs OBS 30+, and neither setting is
+    /// worth losing the connection over - recording still works using OBS's own configuration.
+    /// </summary>
+    private void ApplyRecordingOutputSettings()
+    {
+        if (!_obsController.IsConnected)
+        {
+            return;
+        }
+
+        try
+        {
+            _obsController.SetReplayBufferSeconds(ReplayBufferLengthSeconds);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Could not set replay buffer length: {ex.Message}";
+        }
+
+        if (string.IsNullOrWhiteSpace(ClipStorageFolder))
+        {
+            return;
+        }
+
+        try
+        {
+            _obsController.SetRecordDirectory(ClipStorageFolder);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Could not set the recording folder in OBS (needs OBS 30+): {ex.Message}";
+        }
+    }
+
     private void RefreshAudioSources()
     {
         AudioSources.Clear();
@@ -683,6 +718,7 @@ public partial class MainViewModel : ObservableObject
         settings.ObsWebsocketPort = ObsPort;
         settings.ObsWebsocketPassword = ObsPassword;
         settings.ClipStorageFolder = ClipStorageFolder;
+        settings.ReplayBufferLengthSeconds = ReplayBufferLengthSeconds;
         settings.ReplayBufferSaveHotkeyVk = ReplayBufferSaveHotkeyVk;
         settings.ReplayBufferSaveHotkeyModifiers = ReplayBufferSaveHotkeyModifiers;
         settings.StartStopRecordingHotkeyVk = StartStopRecordingHotkeyVk;
@@ -700,6 +736,10 @@ public partial class MainViewModel : ObservableObject
         // first - Save shouldn't silently leave the preview one step behind the DB.
         ThemeManager.ApplyColors(PrimaryColorHex, SecondaryColorHex, TertiaryColorHex, QuaternaryColorHex);
         StatusMessage = "Settings saved.";
+
+        // Re-push the OBS-enforced settings so a changed clip folder / buffer length doesn't sit in the
+        // database until the next app restart.
+        ApplyRecordingOutputSettings();
 
         // May overwrite the "Settings saved." message above with a registration failure - that's
         // intended, a failed re-registration is more important for the user to see than the generic
@@ -772,6 +812,7 @@ public partial class MainViewModel : ObservableObject
         _gameDetectionService.Dispose();
         ClipBrowser.Dispose();
         _ingestCoordinator.Dispose();
+        _soundCuePlayer.Dispose();
         _obsController.Dispose();
     }
 }

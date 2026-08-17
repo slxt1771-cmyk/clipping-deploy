@@ -12,8 +12,12 @@ namespace ClippingSoftware.App.Theming;
 /// anything living there always throws. Constructing a new brush with the final color already baked in and
 /// replacing the dictionary entry sidesteps that entirely: freezing on insert doesn't matter when nothing
 /// needs to mutate that same object again later. This only re-themes the app live because every XAML
-/// consumer uses `{DynamicResource}` for these 10 keys (not `{StaticResource}`, which bakes in the original
+/// consumer uses `{DynamicResource}` for these keys (not `{StaticResource}`, which bakes in the original
 /// object reference at parse time and would never see a dictionary-entry replacement).
+///
+/// Only keys some XAML actually consumes are written here. TertiaryTintBrush/TertiaryShadeBrush are still
+/// defined in Theme.xaml but nothing binds to them, so deriving and overwriting them was pure dead work -
+/// if either gains a consumer, derive it here again alongside the others.
 ///
 /// The 4 slots, per the user's own mental model rather than Theme.xaml's original Primary(white)/
 /// Secondary(black)/Tertiary(signal)/Neutral(surface ramp)/Alert structure:
@@ -59,8 +63,6 @@ public static class ThemeManager
         {
             resources["PaperBrush"] = new SolidColorBrush(tertiary);
             resources["TertiaryBrush"] = new SolidColorBrush(tertiary);
-            resources["TertiaryTintBrush"] = new SolidColorBrush(ColorUtils.Lighten(tertiary, 0.5));
-            resources["TertiaryShadeBrush"] = new SolidColorBrush(ColorUtils.Darken(tertiary, 0.35));
             resources["HairlineBrush"] = new SolidColorBrush(ColorUtils.Darken(tertiary, 0.82));
             resources["DimBrush"] = new SolidColorBrush(ColorUtils.Darken(tertiary, 0.45));
         });

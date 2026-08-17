@@ -130,11 +130,12 @@
                     <TextBlock Text="CLIP-SYS // CTRL-DECK" Style="{StaticResource EyebrowTextStyle}" FontWeight="Bold" VerticalAlignment="Center"/>
                 </StackPanel>
 
-                <!-- Update available (Velopack - see MainViewModel.CheckForUpdatesAsync/InstallUpdateCommand):
-                     collapsed until IsUpdateAvailable flips true (checked once on every launch), then this
-                     is the first thing after the app label in a titlebar that's visible from every tab -
-                     deliberately the loudest thing in an otherwise flat/monochrome UI so it can't be missed.
-                     Pressing it downloads the update and restarts the app into it automatically. -->
+                <!-- Update available (MainViewModel.CheckForUpdatesAsync/InstallUpdateCommand): collapsed
+                     until IsUpdateAvailable flips true (checked once on every launch), then this is the
+                     first thing after the app label in a titlebar that's visible from every tab -
+                     deliberately the loudest thing in an otherwise flat/monochrome UI so it can't be
+                     missed. Pressing it downloads the update and silently reinstalls over this copy,
+                     which relaunches the app automatically once done (see installer/ClippingSoftware.iss). -->
                 <Button DockPanel.Dock="Left" Content="UPDATE AVAILABLE - CLICK TO INSTALL"
                         Command="{Binding InstallUpdateCommand}" Margin="20,0,0,0" Padding="10,4"
                         VerticalAlignment="Center" Background="{DynamicResource TertiaryBrush}"
@@ -449,6 +450,8 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="110"/>
@@ -458,13 +461,22 @@
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="Clip Folder" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding ClipStorageFolder, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
 
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Save Replay" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                            <controls:HotkeyCaptureBox Grid.Row="1" Grid.Column="1" HorizontalAlignment="Left" Margin="0,4"
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Clip Length (s)" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ReplayBufferLengthSeconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,4"/>
+
+                            <!-- OBS only reads the buffer length when the replay-buffer output starts, so a
+                                 change here takes effect on the next reconnect rather than immediately. -->
+                            <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Margin="0,0,0,6" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource DimBrush}" FontSize="11"
+                                       Text="How many seconds a saved clip covers. Applies on the next OBS reconnect."/>
+
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Save Replay" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <controls:HotkeyCaptureBox Grid.Row="3" Grid.Column="1" HorizontalAlignment="Left" Margin="0,4"
                                                         VirtualKey="{Binding ReplayBufferSaveHotkeyVk, Mode=TwoWay}"
                                                         Modifiers="{Binding ReplayBufferSaveHotkeyModifiers, Mode=TwoWay}"/>
 
-                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Start/Stop Rec" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                            <controls:HotkeyCaptureBox Grid.Row="2" Grid.Column="1" HorizontalAlignment="Left" Margin="0,4"
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Start/Stop Rec" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <controls:HotkeyCaptureBox Grid.Row="4" Grid.Column="1" HorizontalAlignment="Left" Margin="0,4"
                                                         VirtualKey="{Binding StartStopRecordingHotkeyVk, Mode=TwoWay}"
                                                         Modifiers="{Binding StartStopRecordingHotkeyModifiers, Mode=TwoWay}"/>
                         </Grid>
