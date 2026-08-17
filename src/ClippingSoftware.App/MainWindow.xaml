@@ -164,15 +164,18 @@
                 <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Margin="20,0,0,0" VerticalAlignment="Center">
                     <TextBlock Text="GAME" Style="{StaticResource EyebrowTextStyle}" VerticalAlignment="Center"/>
                     <TextBlock Text="{Binding DetectedGameName}" Margin="8,0,0,0" VerticalAlignment="Center"
-                               FontFamily="{StaticResource MonoFont}" FontSize="11"/>
+                               FontFamily="{StaticResource MonoFont}" FontSize="11" Foreground="{DynamicResource PaperBrush}"/>
                 </StackPanel>
 
                 <!-- Global status line (StatusMessage is written to from every tab's actions - connect,
                      record, capture-source changes, settings save, etc.) - lives here instead of on one
-                     tab's own row now that it's genuinely app-wide, not just a Capture-tab concern. -->
+                     tab's own row now that it's genuinely app-wide, not just a Capture-tab concern. Full
+                     Paper white rather than the dimmer eyebrow tone: this line also carries the in-progress
+                     update-download percentage, which needs to actually be readable against the near-black
+                     titlebar, not just present. -->
                 <TextBlock DockPanel.Dock="Left" Text="{Binding StatusMessage}" Margin="20,0,0,0" VerticalAlignment="Center"
                            MaxWidth="320" TextTrimming="CharacterEllipsis" ToolTip="{Binding StatusMessage}"
-                           FontFamily="{StaticResource MonoFont}" FontSize="11" Foreground="{DynamicResource DimBrush}"/>
+                           FontFamily="{StaticResource MonoFont}" FontSize="11" Foreground="{DynamicResource PaperBrush}"/>
 
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" WindowChrome.IsHitTestVisibleInChrome="True">
                     <Button Style="{StaticResource TitleBarButtonStyle}" Click="Minimize_Click" ToolTip="Minimize">
