@@ -180,8 +180,21 @@ public partial class MainViewModel : ObservableObject
         _audioSourceManager.SourcesChanged += () => App.Current.Dispatcher.Invoke(RefreshAudioSources);
         _audioSourceRefreshTimer.Tick += (_, _) =>
         {
-            _audioSourceManager.EnsurePresetSources();
-            _audioSourceManager.RefreshAppSourceTargets();
+            // Fetch once and hand it to both - they'd otherwise each independently round-trip to OBS for
+            // the same running-window list on every tick.
+            List<(string Label, string Value)>? runningWindows = null;
+            try
+            {
+                runningWindows = _obsController.GetWindowOptions(ObsController.WindowCaptureSourceName);
+            }
+            catch
+            {
+                // Best-effort - each method below falls back to fetching (and failing/no-op-ing) on its
+                // own rather than skipping outright.
+            }
+
+            _audioSourceManager.EnsurePresetSources(runningWindows);
+            _audioSourceManager.RefreshAppSourceTargets(runningWindows);
         };
 
         _gameDetectionService = new GameDetectionService(_gameDatabase, _gameProfileRepository);
@@ -653,6 +666,7 @@ public partial class MainViewModel : ObservableObject
 
     public void Shutdown()
     {
+        _audioSourceRefreshTimer.Stop();
         _profileApplier.Dispose();
         _gameDetectionService.Dispose();
         ClipBrowser.Dispose();

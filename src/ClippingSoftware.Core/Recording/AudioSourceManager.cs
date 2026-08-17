@@ -182,9 +182,7 @@ public class AudioSourceManager(ObsController obsController, AudioSourceReposito
 
         try
         {
-            var windowValue = obsController.GetWindowOptions(ObsController.WindowCaptureSourceName)
-                .FirstOrDefault(w => w.Value.EndsWith(":" + processExeName, StringComparison.OrdinalIgnoreCase))
-                .Value;
+            var windowValue = FindWindowForExe(obsController.GetWindowOptions(ObsController.WindowCaptureSourceName), processExeName);
 
             if (windowValue is not null)
             {
@@ -220,16 +218,21 @@ public class AudioSourceManager(ObsController obsController, AudioSourceReposito
     /// app just leaves that slot free rather than blocking the others, and an app already present under the
     /// same display label (however it got there) is left alone rather than duplicated.
     /// </summary>
-    public void EnsurePresetSources()
+    /// <param name="runningWindows">Pre-fetched result of GetWindowOptions, when a caller (MainViewModel's
+    /// refresh timer) already has one from the same tick and wants to avoid a second round trip against
+    /// OBS. Omit to have this method fetch its own.</param>
+    public void EnsurePresetSources(List<(string Label, string Value)>? runningWindows = null)
     {
-        List<(string Label, string Value)> runningWindows;
-        try
+        if (runningWindows is null)
         {
-            runningWindows = obsController.GetWindowOptions(ObsController.WindowCaptureSourceName);
-        }
-        catch
-        {
-            return;
+            try
+            {
+                runningWindows = obsController.GetWindowOptions(ObsController.WindowCaptureSourceName);
+            }
+            catch
+            {
+                return;
+            }
         }
 
         foreach (var (exeName, displayLabel) in DefaultPresetApps)
@@ -244,15 +247,15 @@ public class AudioSourceManager(ObsController obsController, AudioSourceReposito
                 continue;
             }
 
-            var match = runningWindows.FirstOrDefault(w => w.Value.EndsWith(":" + exeName, StringComparison.OrdinalIgnoreCase));
-            if (match.Value is null)
+            var match = FindWindowForExe(runningWindows, exeName);
+            if (match is null)
             {
                 continue;
             }
 
             try
             {
-                AddAppAudioSource(match.Value, displayLabel);
+                AddAppAudioSource(match, displayLabel);
             }
             catch
             {
@@ -275,24 +278,34 @@ public class AudioSourceManager(ObsController obsController, AudioSourceReposito
     /// rather than relying on a foreground-change event, since a backgrounded app's window can change
     /// without one ever firing.
     /// </summary>
-    public void RefreshAppSourceTargets()
+    /// <param name="runningWindows">Pre-fetched result of GetWindowOptions - see EnsurePresetSources'
+    /// matching parameter.</param>
+    public void RefreshAppSourceTargets(List<(string Label, string Value)>? runningWindows = null)
     {
-        if (_appSources.Count == 0)
+        // Gate on the repository (the actual source of truth this method loops over), not _appSources -
+        // they're normally kept in lockstep, but RestoreProvisionedSources can throw before fully
+        // repopulating _appSources (e.g. a transient GetSceneItemSourceNames failure) while leaving the
+        // persisted rows untouched; gating on _appSources.Count there would silently skip refreshing for
+        // the rest of the session even though the repository still lists sources that need it.
+        var records = repository.GetAll();
+        if (records.Count == 0)
         {
             return;
         }
 
-        List<(string Label, string Value)> runningWindows;
-        try
+        if (runningWindows is null)
         {
-            runningWindows = obsController.GetWindowOptions(ObsController.WindowCaptureSourceName);
-        }
-        catch
-        {
-            return;
+            try
+            {
+                runningWindows = obsController.GetWindowOptions(ObsController.WindowCaptureSourceName);
+            }
+            catch
+            {
+                return;
+            }
         }
 
-        foreach (var record in repository.GetAll())
+        foreach (var record in records)
         {
             var exeName = record.WindowTarget.Split(':').LastOrDefault();
             if (string.IsNullOrEmpty(exeName))
@@ -300,16 +313,16 @@ public class AudioSourceManager(ObsController obsController, AudioSourceReposito
                 continue;
             }
 
-            var match = runningWindows.FirstOrDefault(w => w.Value.EndsWith(":" + exeName, StringComparison.OrdinalIgnoreCase));
-            if (match.Value is null || match.Value == record.WindowTarget)
+            var match = FindWindowForExe(runningWindows, exeName);
+            if (match is null || match == record.WindowTarget)
             {
                 continue;
             }
 
             try
             {
-                obsController.SetWindowCaptureTarget(record.InputName, match.Value);
-                repository.UpdateWindowTarget(record.InputName, match.Value);
+                obsController.SetWindowCaptureTarget(record.InputName, match);
+                repository.UpdateWindowTarget(record.InputName, match);
             }
             catch
             {
@@ -318,6 +331,14 @@ public class AudioSourceManager(ObsController obsController, AudioSourceReposito
             }
         }
     }
+
+    /// <summary>Shared window-matching logic for every place in this class that resolves a bare exe name
+    /// against GetWindowOptions' live list (Value strings are "title:class:exe" - see
+    /// ObsController.GetWindowOptions' doc comment): the Game source's per-foreground-change re-target,
+    /// preset auto-add, and the periodic app-source refresh above all need "the running window for this
+    /// exe, if any."</summary>
+    private static string? FindWindowForExe(List<(string Label, string Value)> runningWindows, string exeName) =>
+        runningWindows.FirstOrDefault(w => w.Value.EndsWith(":" + exeName, StringComparison.OrdinalIgnoreCase)).Value;
 
     private int NextFreeTrack()
     {
