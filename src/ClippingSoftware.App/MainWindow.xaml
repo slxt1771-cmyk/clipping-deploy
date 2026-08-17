@@ -140,7 +140,7 @@
                 <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Margin="20,0,0,0" VerticalAlignment="Center">
                     <TextBlock Text="GAME" Style="{StaticResource EyebrowTextStyle}" VerticalAlignment="Center"/>
                     <TextBlock Text="{Binding DetectedGameName}" Margin="8,0,0,0" VerticalAlignment="Center"
-                               FontFamily="{StaticResource MonoFont}" FontSize="12"/>
+                               FontFamily="{StaticResource MonoFont}" FontSize="11"/>
                 </StackPanel>
 
                 <!-- Global status line (StatusMessage is written to from every tab's actions - connect,
@@ -378,7 +378,20 @@
                                                           Data="M1,4 L13,4 M5,4 L5,1.5 L9,1.5 L9,4 M3,4 L3,14 L11,14 L11,4 M5.5,7 L5.5,11 M8.5,7 L8.5,11"/>
                                                 </Button>
                                                 <CheckBox DockPanel.Dock="Left" Content="MUTE" IsChecked="{Binding IsMuted}"
-                                                          Margin="0,0,10,0" VerticalAlignment="Center"/>
+                                                          Margin="0,0,10,0" VerticalAlignment="Center">
+                                                    <CheckBox.Style>
+                                                        <Style TargetType="CheckBox">
+                                                            <Style.Triggers>
+                                                                <!-- This explanation only makes sense for a per-app source ("this app's sound" /
+                                                                     "Desktop Audio (above)") - showing it on Desktop Audio's or Mic's own row would
+                                                                     be self-referential nonsense, so it's scoped to IsBuiltIn=False rows only. -->
+                                                                <DataTrigger Binding="{Binding IsBuiltIn}" Value="False">
+                                                                    <Setter Property="ToolTip" Value="Mutes only this source's own isolated track. If Desktop Audio (above) is unmuted, this app's sound is still captured there too, since Desktop Audio is a separate full-system capture, not a mix of these rows - a normally-played clip plays Desktop Audio by default. To actually exclude an app from a clip, deselect its track in the Trim Editor's AUDIO TRACKS row when exporting."/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </CheckBox.Style>
+                                                </CheckBox>
                                                 <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
                                                     <Run Text="{Binding DisplayLabel, Mode=OneWay}"/>
                                                     <Run Text=" · " Foreground="{DynamicResource DimBrush}"/>

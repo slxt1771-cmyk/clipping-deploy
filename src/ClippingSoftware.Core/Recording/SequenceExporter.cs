@@ -40,8 +40,9 @@ public class SequenceExporter(ClipTrimmer? clipTrimmer = null, string? ffmpegPat
                 segmentPaths.Add(segmentPath);
             }
 
+            var uniqueSuffix = Guid.NewGuid().ToString("N")[..8];
             var outputPath = Path.Combine(outputDirectory,
-                $"sequence_{DateTime.Now:yyyyMMdd_HHmmss}{Path.GetExtension(segmentPaths[0])}");
+                $"sequence_{DateTime.Now:yyyyMMdd_HHmmss}_{uniqueSuffix}{Path.GetExtension(segmentPaths[0])}");
             await ConcatAsync(segmentPaths, outputPath, cancellationToken);
             return outputPath;
         }
@@ -67,9 +68,13 @@ public class SequenceExporter(ClipTrimmer? clipTrimmer = null, string? ffmpegPat
     private async Task ConcatAsync(IReadOnlyList<string> segmentPaths, string outputPath, CancellationToken cancellationToken)
     {
         var listFilePath = Path.Combine(Path.GetDirectoryName(outputPath)!, $"concat_{Guid.NewGuid():N}.txt");
-        // These are our own just-created temp segment paths, never user-controlled content, so naive
-        // single-quote wrapping (the concat demuxer's documented format) is safe here.
-        await File.WriteAllLinesAsync(listFilePath, segmentPaths.Select(p => $"file '{p}'"), cancellationToken);
+        // The segment *filenames* are our own generated names, but each full path is Path.Combine'd with
+        // outputDirectory - a caller-supplied parameter (ultimately AppSettings.ExportStorageFolder, a
+        // user-editable folder path) that can itself contain a single quote (e.g. a Windows profile path
+        // like C:\Users\O'Brien\Videos\Clips). Naive `'...'` wrapping breaks the concat demuxer's line
+        // parser on an embedded quote, so escape it the same way the concat demuxer's own docs describe:
+        // close the quote, an escaped literal quote, reopen the quote.
+        await File.WriteAllLinesAsync(listFilePath, segmentPaths.Select(p => $"file '{p.Replace("'", "'\\''")}'"), cancellationToken);
 
         try
         {
@@ -97,13 +102,20 @@ public class SequenceExporter(ClipTrimmer? clipTrimmer = null, string? ffmpegPat
             using var process = Process.Start(startInfo)
                 ?? throw new InvalidOperationException("Failed to start ffmpeg.");
 
-            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken);
-            var stderr = await stderrTask;
-
-            if (process.ExitCode != 0 || !File.Exists(outputPath))
+            try
             {
-                throw new InvalidOperationException($"ffmpeg concat failed (exit {process.ExitCode}): {stderr}");
+                var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+                await process.WaitForExitAsync(cancellationToken);
+                var stderr = await stderrTask;
+
+                if (process.ExitCode != 0 || !File.Exists(outputPath))
+                {
+                    throw new InvalidOperationException($"ffmpeg concat failed (exit {process.ExitCode}): {stderr}");
+                }
+            }
+            finally
+            {
+                ProcessCleanup.KillIfRunning(process);
             }
         }
         finally

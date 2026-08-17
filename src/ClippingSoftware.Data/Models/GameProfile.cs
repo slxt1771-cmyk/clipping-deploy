@@ -33,6 +33,17 @@ public class GameProfile
 
     public int OutputWidth { get; set; }
     public int OutputHeight { get; set; }
+
+    /// <summary>When true, ProfileApplier ignores OutputWidth/OutputHeight and instead queries the current
+    /// primary-display resolution at the moment this profile is applied, using that as the OBS canvas size.
+    /// For a game run through a non-native "stretched" resolution (e.g. via Nvidia Control Panel's
+    /// resolution override, which changes the OS-reported display mode), this keeps the OBS canvas matched
+    /// to whatever the game actually renders at instead of a stale hardcoded value - avoiding the
+    /// letterbox/pillarbox black bars that show up when the canvas is wider/taller than the captured
+    /// desktop image. OutputWidth/OutputHeight are left in place as the fallback/manual values used when
+    /// this is false.</summary>
+    public bool AutoDetectResolution { get; set; }
+
     public int Fps { get; set; } = 60;
     public string ObsProfileName { get; set; } = "Untitled";
     public NvencSettings Encoder { get; set; } = new();

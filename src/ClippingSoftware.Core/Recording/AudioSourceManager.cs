@@ -182,9 +182,7 @@ public class AudioSourceManager(ObsController obsController, AudioSourceReposito
 
         try
         {
-            var windowValue = obsController.GetWindowOptions(ObsController.WindowCaptureSourceName)
-                .FirstOrDefault(w => w.Value.EndsWith(":" + processExeName, StringComparison.OrdinalIgnoreCase))
-                .Value;
+            var windowValue = FindWindowForExe(obsController.GetWindowOptions(ObsController.WindowCaptureSourceName), processExeName);
 
             if (windowValue is not null)
             {
@@ -220,16 +218,21 @@ public class AudioSourceManager(ObsController obsController, AudioSourceReposito
     /// app just leaves that slot free rather than blocking the others, and an app already present under the
     /// same display label (however it got there) is left alone rather than duplicated.
     /// </summary>
-    public void EnsurePresetSources()
+    /// <param name="runningWindows">Pre-fetched result of GetWindowOptions, when a caller (MainViewModel's
+    /// refresh timer) already has one from the same tick and wants to avoid a second round trip against
+    /// OBS. Omit to have this method fetch its own.</param>
+    public void EnsurePresetSources(List<(string Label, string Value)>? runningWindows = null)
     {
-        List<(string Label, string Value)> runningWindows;
-        try
+        if (runningWindows is null)
         {
-            runningWindows = obsController.GetWindowOptions(ObsController.WindowCaptureSourceName);
-        }
-        catch
-        {
-            return;
+            try
+            {
+                runningWindows = obsController.GetWindowOptions(ObsController.WindowCaptureSourceName);
+            }
+            catch
+            {
+                return;
+            }
         }
 
         foreach (var (exeName, displayLabel) in DefaultPresetApps)
@@ -244,15 +247,15 @@ public class AudioSourceManager(ObsController obsController, AudioSourceReposito
                 continue;
             }
 
-            var match = runningWindows.FirstOrDefault(w => w.Value.EndsWith(":" + exeName, StringComparison.OrdinalIgnoreCase));
-            if (match.Value is null)
+            var match = FindWindowForExe(runningWindows, exeName);
+            if (match is null)
             {
                 continue;
             }
 
             try
             {
-                AddAppAudioSource(match.Value, displayLabel);
+                AddAppAudioSource(match, displayLabel);
             }
             catch
             {
@@ -261,6 +264,81 @@ public class AudioSourceManager(ObsController obsController, AudioSourceReposito
             }
         }
     }
+
+    /// <summary>
+    /// Re-resolves every existing app-audio source's OBS window target against whatever's currently
+    /// running, keyed off the executable name embedded at the end of each source's stored WindowTarget
+    /// ("title:class:exe" - see ObsController.GetWindowOptions' doc comment). Needed because nothing else
+    /// in this class ever re-points an app source once it's added: RestoreProvisionedSources only
+    /// (re)creates a scene item that's missing entirely, it doesn't refresh one that's still there but
+    /// pointed at a window that's gone (the app was closed and relaunched as a new process/window - Spotify
+    /// especially, since its window title also changes with every song, so its stored target goes stale far
+    /// more often than just on restart). The Game source doesn't need this - it's already re-targeted on
+    /// every foreground change via SetLinkedGameTargetForProcess. Call this periodically (see MainViewModel)
+    /// rather than relying on a foreground-change event, since a backgrounded app's window can change
+    /// without one ever firing.
+    /// </summary>
+    /// <param name="runningWindows">Pre-fetched result of GetWindowOptions - see EnsurePresetSources'
+    /// matching parameter.</param>
+    public void RefreshAppSourceTargets(List<(string Label, string Value)>? runningWindows = null)
+    {
+        // Gate on the repository (the actual source of truth this method loops over), not _appSources -
+        // they're normally kept in lockstep, but RestoreProvisionedSources can throw before fully
+        // repopulating _appSources (e.g. a transient GetSceneItemSourceNames failure) while leaving the
+        // persisted rows untouched; gating on _appSources.Count there would silently skip refreshing for
+        // the rest of the session even though the repository still lists sources that need it.
+        var records = repository.GetAll();
+        if (records.Count == 0)
+        {
+            return;
+        }
+
+        if (runningWindows is null)
+        {
+            try
+            {
+                runningWindows = obsController.GetWindowOptions(ObsController.WindowCaptureSourceName);
+            }
+            catch
+            {
+                return;
+            }
+        }
+
+        foreach (var record in records)
+        {
+            var exeName = record.WindowTarget.Split(':').LastOrDefault();
+            if (string.IsNullOrEmpty(exeName))
+            {
+                continue;
+            }
+
+            var match = FindWindowForExe(runningWindows, exeName);
+            if (match is null || match == record.WindowTarget)
+            {
+                continue;
+            }
+
+            try
+            {
+                obsController.SetWindowCaptureTarget(record.InputName, match);
+                repository.UpdateWindowTarget(record.InputName, match);
+            }
+            catch
+            {
+                // Best-effort - a transient OBS call failure here just means this source stays on its
+                // previous target until the next refresh tick.
+            }
+        }
+    }
+
+    /// <summary>Shared window-matching logic for every place in this class that resolves a bare exe name
+    /// against GetWindowOptions' live list (Value strings are "title:class:exe" - see
+    /// ObsController.GetWindowOptions' doc comment): the Game source's per-foreground-change re-target,
+    /// preset auto-add, and the periodic app-source refresh above all need "the running window for this
+    /// exe, if any."</summary>
+    private static string? FindWindowForExe(List<(string Label, string Value)> runningWindows, string exeName) =>
+        runningWindows.FirstOrDefault(w => w.Value.EndsWith(":" + exeName, StringComparison.OrdinalIgnoreCase)).Value;
 
     private int NextFreeTrack()
     {

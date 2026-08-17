@@ -128,6 +128,20 @@ public static class Win32Window
     [DllImport("kernel32.dll")]
     public static extern uint GetCurrentThreadId();
 
+    // --- GetSystemMetrics (current primary-display resolution, for GameProfile auto-detect resolution) ---
+    //
+    // Reflects whatever the OS currently reports as the primary display's pixel resolution - including a
+    // resolution *override* (e.g. Nvidia Control Panel's "stretched"/custom-resolution scaling), since that
+    // changes the actual reported display mode system-wide rather than just how the panel scales the final
+    // image. GetSystemMetrics is a live query (not cached), so calling it right before a heavy profile
+    // switch always reflects whatever's active at that moment.
+
+    public const int SM_CXSCREEN = 0;
+    public const int SM_CYSCREEN = 1;
+
+    [DllImport("user32.dll")]
+    public static extern int GetSystemMetrics(int nIndex);
+
     // --- WM_GETMINMAXINFO (custom-chrome maximized-bounds fix, M15) ---
     //
     // WindowChrome removes the OS's own non-client frame, which is what normally clips a maximized

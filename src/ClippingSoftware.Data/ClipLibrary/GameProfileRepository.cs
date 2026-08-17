@@ -62,12 +62,12 @@ public class GameProfileRepository
             INSERT INTO GameProfiles (
                 Id, DisplayName, ExecutableMatches, RequireFullscreenOrBorderless, CaptureMode,
                 CaptureTargetMonitorId, CaptureTargetWindow,
-                MicEnabled, DesktopAudioEnabled, OutputWidth, OutputHeight, Fps, ObsProfileName,
+                MicEnabled, DesktopAudioEnabled, OutputWidth, OutputHeight, AutoDetectResolution, Fps, ObsProfileName,
                 EncoderJson, IsBuiltInDefault
             ) VALUES (
                 @Id, @DisplayName, @ExecutableMatches, @RequireFullscreenOrBorderless, @CaptureMode,
                 @CaptureTargetMonitorId, @CaptureTargetWindow,
-                @MicEnabled, @DesktopAudioEnabled, @OutputWidth, @OutputHeight, @Fps, @ObsProfileName,
+                @MicEnabled, @DesktopAudioEnabled, @OutputWidth, @OutputHeight, @AutoDetectResolution, @Fps, @ObsProfileName,
                 @EncoderJson, @IsBuiltInDefault
             )
             """, GameProfileRow.FromModel(profile));
@@ -88,6 +88,7 @@ public class GameProfileRepository
                 DesktopAudioEnabled = @DesktopAudioEnabled,
                 OutputWidth = @OutputWidth,
                 OutputHeight = @OutputHeight,
+                AutoDetectResolution = @AutoDetectResolution,
                 Fps = @Fps,
                 ObsProfileName = @ObsProfileName,
                 EncoderJson = @EncoderJson,
@@ -155,6 +156,7 @@ public class GameProfileRepository
         public bool DesktopAudioEnabled { get; set; }
         public int OutputWidth { get; set; }
         public int OutputHeight { get; set; }
+        public bool AutoDetectResolution { get; set; }
         public int Fps { get; set; }
         public string ObsProfileName { get; set; } = string.Empty;
         public string EncoderJson { get; set; } = "{}";
@@ -173,6 +175,7 @@ public class GameProfileRepository
             DesktopAudioEnabled = profile.DesktopAudioEnabled,
             OutputWidth = profile.OutputWidth,
             OutputHeight = profile.OutputHeight,
+            AutoDetectResolution = profile.AutoDetectResolution,
             Fps = profile.Fps,
             ObsProfileName = profile.ObsProfileName,
             EncoderJson = JsonSerializer.Serialize(profile.Encoder),
@@ -192,6 +195,7 @@ public class GameProfileRepository
             DesktopAudioEnabled = DesktopAudioEnabled,
             OutputWidth = OutputWidth,
             OutputHeight = OutputHeight,
+            AutoDetectResolution = AutoDetectResolution,
             Fps = Fps,
             ObsProfileName = ObsProfileName,
             Encoder = JsonSerializer.Deserialize<NvencSettings>(EncoderJson) ?? new NvencSettings(),

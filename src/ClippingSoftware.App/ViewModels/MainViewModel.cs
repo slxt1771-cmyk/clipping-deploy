@@ -33,6 +33,22 @@ public partial class MainViewModel : ObservableObject
     private readonly ClipEditDraftRepository _draftRepository;
     private readonly SequenceRepository _sequenceRepository;
 
+    /// <summary>Periodically re-resolves app-audio source window targets and picks up newly-launched preset
+    /// apps (see AudioSourceManager.RefreshAppSourceTargets/EnsurePresetSources) - a backgrounded app like
+    /// Spotify can close, relaunch, or just change its window title (every song) without ever triggering a
+    /// foreground-change event, so this can't be driven off GameDetectionService's WinEvent hook the way the
+    /// Game source is. A plain System.Threading.Timer (not DispatcherTimer) so this round-trips to OBS on a
+    /// thread-pool thread instead of the UI thread - nothing it does touches WPF objects directly, it only
+    /// reaches the UI indirectly via AudioSourceManager.SourcesChanged, which is already dispatcher-marshaled
+    /// in the subscription above. 3 minutes rather than something snappier since none of this is
+    /// time-critical (a stale app-audio target sitting wrong for a few extra minutes is harmless) and the
+    /// whole point is minimizing steady-state background work while a game's running. Started/stopped via
+    /// Change() alongside Connected/Disconnected below; constructed idle (Timeout.Infinite) since nothing
+    /// should run before the first connect.</summary>
+    private readonly Timer _audioSourceRefreshTimer;
+
+    private static readonly TimeSpan AudioSourceRefreshInterval = TimeSpan.FromMinutes(3);
+
     public ObsController ObsController => _obsController;
 
     public AppSettings Settings { get; private set; }
@@ -170,6 +186,7 @@ public partial class MainViewModel : ObservableObject
         ClipBrowser.TrimEditorRequested += OnTrimEditorRequested;
 
         _audioSourceManager.SourcesChanged += () => App.Current.Dispatcher.Invoke(RefreshAudioSources);
+        _audioSourceRefreshTimer = new Timer(_ => AudioSourceRefreshTick(), null, Timeout.Infinite, Timeout.Infinite);
 
         _gameDetectionService = new GameDetectionService(_gameDatabase, _gameProfileRepository);
         _profileApplier = new ProfileApplier(_obsController, _gameDetectionService);
@@ -215,6 +232,8 @@ public partial class MainViewModel : ObservableObject
                 StatusMessage = $"Failed to restore audio sources: {ex.Message}";
             }
 
+            _audioSourceRefreshTimer.Change(AudioSourceRefreshInterval, AudioSourceRefreshInterval);
+
             try
             {
                 _obsController.StartReplayBuffer();
@@ -234,6 +253,7 @@ public partial class MainViewModel : ObservableObject
             IsRecording = false;
             IsReplayBufferActive = false;
             StatusMessage = "Disconnected from OBS.";
+            _audioSourceRefreshTimer.Change(Timeout.Infinite, Timeout.Infinite);
         });
         _obsController.RecordingStopped += path => App.Current.Dispatcher.Invoke(() =>
         {
@@ -545,6 +565,26 @@ public partial class MainViewModel : ObservableObject
         AddAppAudioSourceCommand.NotifyCanExecuteChanged();
     }
 
+    /// <summary>_audioSourceRefreshTimer's callback - runs on a thread-pool thread, not the UI thread (see
+    /// the timer's own doc comment). Fetches the running-window list once and hands it to both methods
+    /// below, which would otherwise each independently round-trip to OBS for the same list.</summary>
+    private void AudioSourceRefreshTick()
+    {
+        List<(string Label, string Value)>? runningWindows = null;
+        try
+        {
+            runningWindows = _obsController.GetWindowOptions(ObsController.WindowCaptureSourceName);
+        }
+        catch
+        {
+            // Best-effort - each method below falls back to fetching (and failing/no-op-ing) on its own
+            // rather than skipping outright.
+        }
+
+        _audioSourceManager.EnsurePresetSources(runningWindows);
+        _audioSourceManager.RefreshAppSourceTargets(runningWindows);
+    }
+
     [RelayCommand]
     private void SaveSettings()
     {
@@ -637,6 +677,7 @@ public partial class MainViewModel : ObservableObject
 
     public void Shutdown()
     {
+        _audioSourceRefreshTimer.Dispose();
         _profileApplier.Dispose();
         _gameDetectionService.Dispose();
         ClipBrowser.Dispose();

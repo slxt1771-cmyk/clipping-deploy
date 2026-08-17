@@ -80,8 +80,13 @@ public class ClipTrimmer(string? ffmpegPath = null)
 
         Directory.CreateDirectory(outputDirectory);
 
+        // The timestamp alone is only second-resolution, so trimming two segments from the same source
+        // clip (SequenceExporter does exactly this, once per segment, in a tight loop) can land in the
+        // same second and collide, silently overwriting the first segment's output - the short random
+        // suffix guarantees uniqueness regardless of timing.
+        var uniqueSuffix = Guid.NewGuid().ToString("N")[..8];
         var outputFileName =
-            $"{Path.GetFileNameWithoutExtension(sourceFilePath)}_trim_{DateTime.Now:yyyyMMdd_HHmmss}{Path.GetExtension(sourceFilePath)}";
+            $"{Path.GetFileNameWithoutExtension(sourceFilePath)}_trim_{DateTime.Now:yyyyMMdd_HHmmss}_{uniqueSuffix}{Path.GetExtension(sourceFilePath)}";
         var outputPath = Path.Combine(outputDirectory, outputFileName);
 
         var duration = end - start;
@@ -225,15 +230,27 @@ public class ClipTrimmer(string? ffmpegPath = null)
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to start ffmpeg.");
 
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        var stderr = await stderrTask;
-
-        if (process.ExitCode != 0 || !File.Exists(outputPath))
+        // If cancellation (or a stream-read failure) throws out of the awaits below, Dispose() alone
+        // wouldn't stop the still-running ffmpeg process - it only releases the .NET wrapper, not the OS
+        // process - leaving it to keep running/writing outputPath in the background indefinitely. The
+        // finally below only fires Kill when the process is confirmed still running, so the normal
+        // success path (already exited by the time WaitForExitAsync returns) is unaffected.
+        try
         {
-            throw new InvalidOperationException($"ffmpeg trim failed (exit {process.ExitCode}): {stderr}");
-        }
+            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken);
+            var stderr = await stderrTask;
 
-        return outputPath;
+            if (process.ExitCode != 0 || !File.Exists(outputPath))
+            {
+                throw new InvalidOperationException($"ffmpeg trim failed (exit {process.ExitCode}): {stderr}");
+            }
+
+            return outputPath;
+        }
+        finally
+        {
+            ProcessCleanup.KillIfRunning(process);
+        }
     }
 }

@@ -82,7 +82,11 @@ public partial class TagManagerViewModel : ObservableObject
     [RelayCommand]
     private void SelectTag(TagViewModel? tag) => SelectedTag = tag;
 
-    private void RebuildClipRows()
+    /// <summary>Public so ClipBrowserViewModel can refresh this checklist after deleting a clip - ClipRows
+    /// is otherwise only rebuilt when SelectedTag changes, so a clip deleted while this tag stays selected
+    /// would keep showing a now-nonexistent clip's row (still checkable, silently writing an orphaned
+    /// ClipTags association if toggled) until the user happened to reselect a tag.</summary>
+    public void RebuildClipRows()
     {
         foreach (var row in ClipRows)
         {

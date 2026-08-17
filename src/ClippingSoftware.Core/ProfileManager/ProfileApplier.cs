@@ -1,6 +1,7 @@
 using ClippingSoftware.Core.GameDetection;
 using ClippingSoftware.Core.Obs;
 using ClippingSoftware.Data.Models;
+using ClippingSoftware.Shared.Interop;
 
 namespace ClippingSoftware.Core.ProfileManager;
 
@@ -70,12 +71,28 @@ public sealed class ProfileApplier : IDisposable
         ProfileApplied?.Invoke(profile, isHeavySwitch);
     }
 
-    private static bool RequiresHeavySwitch(GameProfile previous, GameProfile next) =>
-        previous.OutputWidth != next.OutputWidth ||
-        previous.OutputHeight != next.OutputHeight ||
-        previous.Fps != next.Fps ||
-        previous.ObsProfileName != next.ObsProfileName ||
-        !EncoderMatches(previous.Encoder, next.Encoder);
+    private static bool RequiresHeavySwitch(GameProfile previous, GameProfile next)
+    {
+        var (previousWidth, previousHeight) = ResolveResolution(previous);
+        var (nextWidth, nextHeight) = ResolveResolution(next);
+
+        return previousWidth != nextWidth ||
+            previousHeight != nextHeight ||
+            previous.Fps != next.Fps ||
+            previous.ObsProfileName != next.ObsProfileName ||
+            !EncoderMatches(previous.Encoder, next.Encoder);
+    }
+
+    /// <summary>
+    /// The width/height actually applied for a profile: its stored OutputWidth/OutputHeight, or - if
+    /// AutoDetectResolution is set - whatever the primary display currently reports (see
+    /// Win32Window.GetSystemMetrics doc comment). Centralized here so RequiresHeavySwitch's diff and
+    /// ApplyHeavySwitch's SetVideoSettings call always agree on what "this profile's resolution" means.
+    /// </summary>
+    private static (int Width, int Height) ResolveResolution(GameProfile profile) =>
+        profile.AutoDetectResolution
+            ? (Win32Window.GetSystemMetrics(Win32Window.SM_CXSCREEN), Win32Window.GetSystemMetrics(Win32Window.SM_CYSCREEN))
+            : (profile.OutputWidth, profile.OutputHeight);
 
     private static bool EncoderMatches(NvencSettings a, NvencSettings b) =>
         a.Codec == b.Codec &&
@@ -94,36 +111,49 @@ public sealed class ProfileApplier : IDisposable
 
     private void ApplyHeavySwitch(GameProfile profile)
     {
-        var replayBufferWasActive = _obs.GetReplayBufferActive();
-
-        if (replayBufferWasActive)
+        // Per obs-websocket v5, SetCurrentProfile/SetVideoSettings are rejected while *any* output is
+        // running - not just the replay buffer. Unlike the replay buffer (which this app owns and can
+        // stop/restart transparently), a manual recording is a deliberate user action; auto-stopping it
+        // just to apply a profile's resolution would silently split the user's recording into two files,
+        // which is worse than just deferring the video-settings change. So: only touch video
+        // settings/profile when nothing is actively recording. Audio mute state and capture target don't
+        // need an output stopped, so those still apply either way - this used to be one unguarded sequence
+        // where an exception here (previously only guarded for the replay buffer) aborted the whole method,
+        // silently skipping even the parts that didn't need output stopped.
+        if (!_obs.GetRecordingActive())
         {
-            _obs.SaveReplayBuffer();
-            // Give OBS a moment to flush the in-flight save before pulling the buffer out from under it.
-            Thread.Sleep(500);
-            _obs.StopReplayBuffer();
-        }
+            var replayBufferWasActive = _obs.GetReplayBufferActive();
 
-        if (!string.Equals(_obs.GetCurrentProfileName(), profile.ObsProfileName, StringComparison.Ordinal))
-        {
-            _obs.SetCurrentProfile(profile.ObsProfileName);
-        }
+            if (replayBufferWasActive)
+            {
+                _obs.SaveReplayBuffer();
+                // Give OBS a moment to flush the in-flight save before pulling the buffer out from under it.
+                Thread.Sleep(500);
+                _obs.StopReplayBuffer();
+            }
 
-        _obs.SetVideoSettings(
-            baseWidth: profile.OutputWidth,
-            baseHeight: profile.OutputHeight,
-            outputWidth: profile.OutputWidth,
-            outputHeight: profile.OutputHeight,
-            fpsNumerator: profile.Fps,
-            fpsDenominator: 1);
+            if (!string.Equals(_obs.GetCurrentProfileName(), profile.ObsProfileName, StringComparison.Ordinal))
+            {
+                _obs.SetCurrentProfile(profile.ObsProfileName);
+            }
+
+            var (width, height) = ResolveResolution(profile);
+            _obs.SetVideoSettings(
+                baseWidth: width,
+                baseHeight: height,
+                outputWidth: width,
+                outputHeight: height,
+                fpsNumerator: profile.Fps,
+                fpsDenominator: 1);
+
+            if (replayBufferWasActive)
+            {
+                _obs.StartReplayBuffer();
+            }
+        }
 
         ApplyAudioMuteState(profile);
         ApplyCaptureTarget(profile);
-
-        if (replayBufferWasActive)
-        {
-            _obs.StartReplayBuffer();
-        }
     }
 
     private void ApplyAudioMuteState(GameProfile profile)

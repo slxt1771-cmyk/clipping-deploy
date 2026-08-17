@@ -31,6 +31,17 @@ public class AudioSourceRepository(Database database)
         connection.Execute("DELETE FROM AudioSources WHERE InputName = @InputName", new { InputName = inputName });
     }
 
+    /// <summary>Updates just the persisted window target for an existing source (AudioSourceManager's
+    /// periodic re-resolution against whatever's currently running - see RefreshAppSourceTargets), so a
+    /// later app restart's stale-fallback matching starts from the most recently known-good value instead
+    /// of whatever the source happened to be created with, possibly a long time ago.</summary>
+    public void UpdateWindowTarget(string inputName, string windowTarget)
+    {
+        using var connection = database.OpenConnection();
+        connection.Execute("UPDATE AudioSources SET WindowTarget = @WindowTarget WHERE InputName = @InputName",
+            new { WindowTarget = windowTarget, InputName = inputName });
+    }
+
     private class AudioSourceRow
     {
         public string Id { get; set; } = string.Empty;

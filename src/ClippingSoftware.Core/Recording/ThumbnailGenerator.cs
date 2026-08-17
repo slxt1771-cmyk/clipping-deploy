@@ -44,13 +44,20 @@ public class ThumbnailGenerator(string? ffmpegPath = null)
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to start ffmpeg.");
 
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        var stderr = await stderrTask;
-
-        if (process.ExitCode != 0 || !File.Exists(outputJpgPath))
+        try
         {
-            throw new InvalidOperationException($"ffmpeg thumbnail generation failed (exit {process.ExitCode}): {stderr}");
+            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken);
+            var stderr = await stderrTask;
+
+            if (process.ExitCode != 0 || !File.Exists(outputJpgPath))
+            {
+                throw new InvalidOperationException($"ffmpeg thumbnail generation failed (exit {process.ExitCode}): {stderr}");
+            }
+        }
+        finally
+        {
+            ProcessCleanup.KillIfRunning(process);
         }
     }
 }

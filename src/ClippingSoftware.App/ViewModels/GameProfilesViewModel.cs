@@ -82,6 +82,11 @@ public partial class GameProfilesViewModel : ObservableObject
     [ObservableProperty]
     private int _editOutputHeight;
 
+    /// <summary>When true, Output Width/Height are ignored and ProfileApplier resolves the actual canvas
+    /// size from the current display mode at apply-time instead (see GameProfile.AutoDetectResolution).</summary>
+    [ObservableProperty]
+    private bool _editAutoDetectResolution;
+
     [ObservableProperty]
     private int _editFps = 60;
 
@@ -169,6 +174,7 @@ public partial class GameProfilesViewModel : ObservableObject
         EditDesktopAudioEnabled = profile.DesktopAudioEnabled;
         EditOutputWidth = profile.OutputWidth;
         EditOutputHeight = profile.OutputHeight;
+        EditAutoDetectResolution = profile.AutoDetectResolution;
         EditFps = profile.Fps;
         EditObsProfileName = profile.ObsProfileName;
         EditCodec = profile.Encoder.Codec;
@@ -259,6 +265,7 @@ public partial class GameProfilesViewModel : ObservableObject
         DesktopAudioEnabled = EditDesktopAudioEnabled,
         OutputWidth = EditOutputWidth,
         OutputHeight = EditOutputHeight,
+        AutoDetectResolution = EditAutoDetectResolution,
         Fps = EditFps,
         ObsProfileName = EditObsProfileName,
         Encoder = new NvencSettings

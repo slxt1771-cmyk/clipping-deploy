@@ -34,7 +34,9 @@
                       DisplayMemberPath="FileNameTag"/>
         </DockPanel>
 
-        <Border Grid.Row="1" Background="Black" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1">
+        <!-- Click anywhere on the video to toggle play/pause, same as most video players. -->
+        <Border Grid.Row="1" Background="Black" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1"
+                Cursor="Hand" MouseLeftButtonDown="Player_Click">
             <MediaElement x:Name="Player" LoadedBehavior="Manual" UnloadedBehavior="Manual"
                           Stretch="Uniform" MediaOpened="Player_MediaOpened"/>
         </Border>
@@ -50,6 +52,8 @@
                        Text="{Binding TotalSeconds, StringFormat='{}/ {0:0.0}s'}"/>
         </StackPanel>
 
+        <!-- Click-to-jump on this track comes from the app-wide Slider style (Theme.xaml,
+             IsMoveToPointEnabled) - see that style's doc comment for why. -->
         <Slider Grid.Row="3" x:Name="ScrubSlider" Minimum="0" Margin="0,6,0,0"
                 PreviewMouseDown="ScrubSlider_PreviewMouseDown"
                 PreviewMouseUp="ScrubSlider_PreviewMouseUp"/>

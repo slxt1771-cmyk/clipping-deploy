@@ -27,6 +27,7 @@ changes; treat it as living, not historical.
 | M15 | Nav moved to a left icon rail with Clips as the default tab, runtime Primary/Secondary accent-color customization, and the custom titlebar M14 deliberately deferred | Done - see below for detail on each. |
 | M16 | Tab restructure (Clips/Capture/Settings, in that order), Capture-vs-everything-else split, embedded per-clip editor with autosaved drafts, a simple multi-clip Sequence editor, and a layout/centering pass on Capture+Settings | Done - see below for detail on each. |
 | M17 | Page-by-page polish pass: Clips header reflow + a Filters popup, and folding Capture back into Settings | Done. **Clips**: the title row (`ClipBrowserView.xaml`) now right-docks SEARCH/FILTERS/REFRESH in line with "CLIP-SYS // CL-001" instead of a separate row below it, and the "MODULE_ID: CLIP_LIBRARY" subtitle is gone (redundant with the tab's own context). LIBRARY/EDIT/TAGS became one coherent pill group (`Theme.xaml`'s new `SubNavButtonStyle`): dim/transparent by default, white label + tertiary bottom-accent when selected - same visual grammar the left icon rail already used for its own selected state, just applied here too. The always-visible tag-chip row moved into a new FILTERS popup (`ClipBrowserViewModel.IsFilterPanelOpen`/`ToggleFilterPanelCommand`), which also gained a Clips-vs-Recordings segmented filter (`TypeFilter`, checked against `ClipMetadata.IsTrimmedCopy` in `FilterClip`) - lets a trimmed export be told apart from a raw replay-buffer/manual recording. **Capture folded into Settings**: the separate Capture tab is gone - nav is just Clips/Settings now. Its CAPTURE SOURCE and AUDIO SOURCES groups joined Settings' existing WrapPanel (still 340px/uniform-width, now six groups in a row instead of two-plus-four split across tabs), and Game Profiles moved down with them, unchanged in its own bounded (non-scrolled) row below the WrapPanel's ScrollViewer for the same reason it always needed one - a DataGrid's "*" row collapses to zero inside an infinite-height ScrollViewer. CONNECT (previously floating in its own row next to Start/Stop Recording) is now a centered action button inside the CONNECTION group, next to the host/port/password fields it actually connects. Start/Stop Recording and the global StatusMessage moved to the title bar (`MainWindow.xaml`'s row 0) - reachable from either tab now, same reasoning as the LIVE/BUFFER lamps already living there. **Every milestone row above that says "Capture tab"** (M7, M8, M12, M13, M14) is describing where things lived at the time they were built - that page doesn't exist anymore, its content is on Settings now; left as historical record rather than rewritten, per this doc's own convention of layering later changes as notes (see M15/M16) instead of editing old rows in place. |
+| M18 | First real-usage bug pass: per-game auto-detect resolution (fixes black-bar clips from a stretched-resolution game), click-to-seek on the Trim Editor scrub bar, click-to-pause on the video, a stray font-size fix, and app-audio source staleness/mute-scope clarity | Done - see below for detail on each. |
 
 Multi-track audio recording itself (a clip's container carrying more than the old fixed
 desktop+mic pair) is the schema change underneath M8/M9: `ClipMetadata.HasMicTrack`/
@@ -99,6 +100,107 @@ once backfill had already copied their data into `AudioTracksJson`; see M15's bu
 
 All of M1-M17 plus the two originally-unnumbered gaps (game profile UI, hotkey rebinding UI)
 are now done. What's left is smaller polish items — see below.
+
+**M18 in detail:**
+
+- **Auto-detect resolution, per game profile.** Root cause of the black-bar clips: `GameProfile.OutputWidth`/
+  `OutputHeight` was always a fixed value (2560x1440 for Default), applied as both OBS's base *and* output
+  canvas size on every heavy switch (`ProfileApplier.ApplyHeavySwitch`) - a game actually rendered at a
+  different ("stretched", e.g. via Nvidia Control Panel's resolution override) resolution gets captured at
+  that smaller/differently-shaped size but pasted onto the larger fixed canvas, leaving the unfilled canvas
+  area black. `GameProfile.AutoDetectResolution` (new bool, additive DB column) lets a profile opt out of the
+  fixed value: when set, `ProfileApplier.ResolveResolution` queries `Win32Window.GetSystemMetrics(SM_CXSCREEN/
+  SM_CYSCREEN)` (Shared - new P/Invoke) right before applying, which reflects whatever the OS currently
+  reports as the primary display's resolution *including* a Nvidia Control Panel-style override (that changes
+  the actual reported display mode, not just how the panel scales the final pixels), so the canvas always
+  matches what's actually being rendered. `RequiresHeavySwitch`'s diff was rewired through the same resolver
+  so a profile with auto-detect on still diffs correctly against one that doesn't. Manual entry (the
+  pre-existing Output Width/Height fields) is unchanged and still used when auto-detect is off - exposed as an
+  "Auto-Detect Resolution" checkbox above them in `GameProfilesView` that disables the two fields while
+  checked (`InverseBooleanConverter`, new). No multi-monitor mapping involved (deliberately - primary-display
+  `GetSystemMetrics` only), matching this app's single-machine/personal-use scope.
+- **Trim Editor scrub bar: click-to-seek.** `Slider`'s `IsMoveToPointEnabled` defaults to `false`, so a plain
+  click on the track only nudged the value by `LargeChange` via the track's repeat-buttons instead of jumping
+  to the clicked point - looked like "click seeks to the wrong spot, drag still works." Set on the app-wide
+  `Slider` style in `Theme.xaml` (not just the scrub bar) so every slider, including the per-track volume
+  sliders, gets the same click-to-jump behavior consistently.
+- **Trim Editor: click-to-pause on the video.** The `Border` hosting the `MediaElement` now has a
+  `MouseLeftButtonDown` handler (`TrimEditorView.Player_Click`) that toggles play/pause, tracked via a new
+  `_isPlaying` field since `MediaElement` doesn't expose one - same toggle the PLAY/PAUSE buttons already
+  used, now reachable by clicking the video itself.
+- **Stray font-size fix.** The titlebar's detected-game-name text (`MainWindow.xaml`) was `FontSize="12"`
+  while every other label/value in that same row (`EyebrowTextStyle`, the status-message text) is `11` - a
+  from-code audit of every hardcoded `FontSize`/`FontFamily`/`Foreground` in the app turned up this one
+  outlier; everything else was already consistent (no stray hardcoded colors/fonts found bypassing the theme
+  resources).
+- **App-audio source staleness fix, reported the same session.** A per-app audio source's OBS window target
+  (`AudioSourceRecord.WindowTarget`, a `"title:class:exe"` string) was only ever set once, at add time -
+  nothing re-pointed it afterward. Spotify's window title includes the current song, so its target went
+  stale within minutes even without restarting the app, let alone across the close/reopen cycles a
+  background app like Spotify goes through constantly; `AudioSourceManager.RefreshAppSourceTargets`
+  (new) re-resolves every existing app source's target from the executable name embedded at the end of its
+  stored value against OBS's live window list, updating both the OBS input (`SetWindowCaptureTarget`) and
+  the persisted record (`AudioSourceRepository.UpdateWindowTarget`, new) whenever it's drifted. `MainViewModel`
+  runs it (plus `EnsurePresetSources`, so an app that wasn't running yet at connect time still gets
+  auto-added once it appears) on a 30s `DispatcherTimer` started/stopped alongside OBS connect/disconnect -
+  polling rather than event-driven, since a backgrounded app's window can change without ever firing a
+  foreground-change event. **Separately, and likely the bigger cause of the actual reported symptom** ("I
+  muted Spotify but I could still hear it in the clip"): muting an app's own isolated track
+  (`AudioSourceManager.SetMuted`) never removes that app from Desktop Audio - Desktop Audio is a *separate,
+  parallel* whole-system capture, so an unmuted Desktop Audio track (the default, and virtually always the
+  first/only track a normal video player opens) still carries every app's sound regardless of any per-app
+  track's mute state. That's an OBS/Windows audio-architecture reality, not a bug in `SetInputMute` wiring -
+  fixed here only by adding a `ToolTip` on the per-app MUTE checkbox explaining it and pointing at the actual
+  way to exclude an app from an export (deselect its track in the Trim Editor's AUDIO TRACKS row, per M9/M11).
+  True live isolation (so Desktop Audio itself never picks up a given app) would need routing that app's
+  output to a non-default Windows playback device - an OS-level setup step for the user, not something this
+  app's code can do on its own.
+- **Full-codebase bug-hunt pass, requested the same session.** Systematic read-through of every project
+  (Core interop/detection/profile-switching, the recording pipeline, the Data layer, App ViewModels/Views),
+  fixing everything confirmed as a real bug rather than a style nit:
+  - `ProfileApplier.ApplyHeavySwitch` only checked the replay buffer before calling `SetCurrentProfile`/
+    `SetVideoSettings`, never an active *recording* - obs-websocket rejects both while any output is
+    running, so switching games while manually recording threw and silently aborted the whole method
+    (including the mute/capture-target changes that don't need an output stopped), leaving the profile
+    stuck out of sync until the next foreground change failed the same way. Now guards on a new
+    `ObsController.GetRecordingActive()`, deferring only the video-settings change while recording (never
+    auto-stopping a user's recording just to apply one) while still applying mute/capture-target regardless.
+  - `ForegroundWatcher.Dispose()` could race its own hook thread's startup: if disposed before the thread
+    had set its ID, it silently skipped `PostThreadMessage(WM_QUIT)` and leaked the thread/hook for the rest
+    of the process. Fixed with a `ManualResetEventSlim` signaled once the hook's message queue actually
+    exists, so `Dispose()` waits for real readiness instead of racing a bare field check.
+  - `TrimEditorView`'s `_isPlaying` flag wasn't reset on a clip switch, so a click on the video during the
+    async `MediaOpened` gap after switching clips could pause instead of play.
+  - Deleting a clip (`ClipBrowserViewModel.Delete`) never cleaned up references to it elsewhere in memory:
+    the Sequence workspace kept a row pointing at the now-deleted file (`SequenceEditorViewModel.
+    RemoveClipReferences`, new), and the Tag Manager's clip checklist kept a stale, still-interactive row
+    for it (`TagManagerViewModel.RebuildClipRows` made public so `Delete` can trigger it).
+  - Every ffmpeg/ffprobe invocation across the recording pipeline left its child process running in the
+    background if cancellation or a stream-read failure threw past the `using var process` - `Dispose()`
+    only releases the .NET wrapper, never kills the OS process. New `Core/Recording/ProcessCleanup.
+    KillIfRunning`, called from a `finally` at every call site (`ClipTrimmer`, `AudioTrackExtractor`,
+    `ClipMetadataExtractor`, `ThumbnailGenerator`, `SequenceExporter`).
+  - `ClipTrimmer`'s output filename had only second-resolution uniqueness, so `SequenceExporter` trimming
+    two segments from the same source clip in a tight loop could collide and silently overwrite one
+    segment's output - added a short random suffix (also applied to `SequenceExporter`'s own final output
+    filename for the same reason).
+  - `SequenceExporter`'s concat list-file quoting broke on a single quote in the output directory path
+    (caller-supplied - ultimately `AppSettings.ExportStorageFolder`, not actually always-safe content as
+    the old comment claimed) - now escapes embedded quotes per the concat demuxer's documented format.
+  - Reviewed and found no confident bugs in: the Data layer (every repository/migration/JSON round-trip),
+    `ObsController`, `ObsProcessManager`, `GameDetectionService`, `GlobalHotkeyService`, `SoundCuePlayer`,
+    and the rest of the App layer's converters/theming/tray-icon code.
+- **Lightweight-while-gaming pass, requested the same session.** The app's stated goal is staying out of a
+  game's way, so this trims steady-state background cost rather than adding a feature: the audio-source
+  refresh timer (added earlier this session) moved off the UI thread (`System.Threading.Timer` instead of
+  `DispatcherTimer` - it only reaches the UI indirectly via the already-dispatcher-marshaled
+  `SourcesChanged` event) and its interval stretched 30s -> 3 minutes, since none of what it fixes is
+  time-critical; `ForegroundWatcher`'s poll-loop fallback (the WinEvent hook is the real, cost-free-while-
+  idle detection path - the poll only exists in case the hook itself fails) slowed 1s -> 5s; and
+  `ForegroundWatcher`'s dedicated hook thread now runs at `ThreadPriority.BelowNormal` so the OS scheduler
+  favors a running game over it under real CPU contention. `ClipIngestWatcher`'s 500ms poll and
+  `TrimEditorView`'s 200ms position poll were deliberately left alone - both are already bounded (only
+  active right after a save, or only while the Trim Editor tab is open), not continuous background cost.
 
 - **Visual identity pass.** The app moved from an early tally-lamp red/green/amber palette to a
   strict 4-family system (Primary white / Secondary black / Tertiary pale-lavender signal color /
