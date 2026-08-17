@@ -28,6 +28,7 @@ changes; treat it as living, not historical.
 | M16 | Tab restructure (Clips/Capture/Settings, in that order), Capture-vs-everything-else split, embedded per-clip editor with autosaved drafts, a simple multi-clip Sequence editor, and a layout/centering pass on Capture+Settings | Done - see below for detail on each. |
 | M17 | Page-by-page polish pass: Clips header reflow + a Filters popup, and folding Capture back into Settings | Done. **Clips**: the title row (`ClipBrowserView.xaml`) now right-docks SEARCH/FILTERS/REFRESH in line with "CLIP-SYS // CL-001" instead of a separate row below it, and the "MODULE_ID: CLIP_LIBRARY" subtitle is gone (redundant with the tab's own context). LIBRARY/EDIT/TAGS became one coherent pill group (`Theme.xaml`'s new `SubNavButtonStyle`): dim/transparent by default, white label + tertiary bottom-accent when selected - same visual grammar the left icon rail already used for its own selected state, just applied here too. The always-visible tag-chip row moved into a new FILTERS popup (`ClipBrowserViewModel.IsFilterPanelOpen`/`ToggleFilterPanelCommand`), which also gained a Clips-vs-Recordings segmented filter (`TypeFilter`, checked against `ClipMetadata.IsTrimmedCopy` in `FilterClip`) - lets a trimmed export be told apart from a raw replay-buffer/manual recording. **Capture folded into Settings**: the separate Capture tab is gone - nav is just Clips/Settings now. Its CAPTURE SOURCE and AUDIO SOURCES groups joined Settings' existing WrapPanel (still 340px/uniform-width, now six groups in a row instead of two-plus-four split across tabs), and Game Profiles moved down with them, unchanged in its own bounded (non-scrolled) row below the WrapPanel's ScrollViewer for the same reason it always needed one - a DataGrid's "*" row collapses to zero inside an infinite-height ScrollViewer. CONNECT (previously floating in its own row next to Start/Stop Recording) is now a centered action button inside the CONNECTION group, next to the host/port/password fields it actually connects. Start/Stop Recording and the global StatusMessage moved to the title bar (`MainWindow.xaml`'s row 0) - reachable from either tab now, same reasoning as the LIVE/BUFFER lamps already living there. **Every milestone row above that says "Capture tab"** (M7, M8, M12, M13, M14) is describing where things lived at the time they were built - that page doesn't exist anymore, its content is on Settings now; left as historical record rather than rewritten, per this doc's own convention of layering later changes as notes (see M15/M16) instead of editing old rows in place. |
 | M18 | First real-usage bug pass: per-game auto-detect resolution (fixes black-bar clips from a stretched-resolution game), click-to-seek on the Trim Editor scrub bar, click-to-pause on the video, a stray font-size fix, and app-audio source staleness/mute-scope clarity | Done - see below for detail on each. |
+| M19 | Real installer + in-app auto-update (Velopack), reversing the earlier "no installer, no auto-update" non-goal by explicit request | Done - see below for detail. **Not verified end-to-end by the agent that built it** - no Windows machine or .NET SDK is available in that environment, so this was built from Velopack's own source/samples (cloned for ground truth rather than guessed) and verified only by careful reading plus watching the GitHub Actions build actually succeed. The first real test of the installed app/update flow happens on the user's own machine. |
 
 Multi-track audio recording itself (a clip's container carrying more than the old fixed
 desktop+mic pair) is the schema change underneath M8/M9: `ClipMetadata.HasMicTrack`/
@@ -202,6 +203,63 @@ are now done. What's left is smaller polish items — see below.
   `TrimEditorView`'s 200ms position poll were deliberately left alone - both are already bounded (only
   active right after a save, or only while the Trim Editor tab is open), not continuous background cost.
 
+**M19 in detail:**
+
+- **Why now.** Requested explicitly the same session, reversing the earlier "no installer, no auto-update"
+  non-goal: the app was only ever launched via `dotnet run`/an IDE from the git-cloned source, with no
+  packaging or update mechanism of any kind - "update" meant someone manually pulling and rebuilding.
+- **Library: [Velopack](https://velopack.io/)**, not a hand-rolled installer/updater. Chosen specifically
+  because it's a single package that does both halves (a real Windows installer wizard *and* in-app
+  update-checking against a plain URL/GitHub Releases feed) with a well-documented, actively maintained
+  WPF integration path - far lower risk than reinventing either half blind, especially since this was
+  built without a Windows machine to test on (see the milestone-table caveat above).
+- **App bootstrapping.** `ClippingSoftware.App.csproj` now sets `<StartupObject>ClippingSoftware.App.App
+  </StartupObject>` and remaps `App.xaml` from an `ApplicationDefinition` to a plain `Page`, so
+  `App.xaml.cs` can define its own `Main()` instead of relying on WPF's auto-generated one - required so
+  `VelopackApp.Build().Run()` runs before anything else, per Velopack's own requirement that it intercept
+  its internal install/update/uninstall command-line args before WPF (or the rest of the app) ever sees
+  them. Exact pattern (including the csproj remap) verified against Velopack's own `samples/CSharpWpf` in
+  its source repo, not guessed.
+- **Update check/download/apply**, `MainViewModel`: `_updateManager` (`Velopack.UpdateManager`, source =
+  `GithubSource` pointed at this repo) is checked once per launch (`CheckForUpdatesAsync`, called from
+  `InitializeAsync` - not polled periodically, since "open the app, see the button" is the actual
+  requirement). `IsUpdateAvailable` backs a new titlebar button (see below); pressing it
+  (`InstallUpdateCommand`) downloads the update, then raises `UpdateReadyToInstall` rather than applying it
+  directly - `UpdateManager.ApplyUpdatesAndRestart` force-exits the process itself (not through WPF's
+  normal `Application.Shutdown()`/window-`Closing` path) and its own doc comment says callers must clean
+  up state first, so `App.xaml.cs` (which already owns that cleanup precedent in `OnExit`) subscribes to
+  the event, disposes the tray icon, calls `MainViewModel.Shutdown()`, then
+  `MainViewModel.ApplyPendingUpdate()` actually terminates and relaunches the app into the new version.
+  Every step is wrapped best-effort (mirroring this codebase's existing background-path convention) so a
+  copy that isn't running from a Velopack-installed location (e.g. still just `dotnet run` in dev) silently
+  has no update button rather than throwing - `UpdateManager.CheckForUpdatesAsync` itself throws in that
+  case (`EnsureInstalled()`), which is expected, not a bug.
+  - **Note for anyone reading this to fix a bug**: `Velopack.UpdateManager.ApplyUpdatesAndRestart` takes a
+    `VelopackAsset`, not the `UpdateInfo` this class stores as `_pendingUpdate` - it compiles because
+    `UpdateInfo` has an implicit conversion operator to `VelopackAsset` (`TargetFullRelease`). Not a typo.
+- **UI**: a new titlebar button (`MainWindow.xaml`, right after the "CLIP-SYS // CTRL-DECK" label - first
+  thing after the app name, in the one row visible from every tab) reading "UPDATE AVAILABLE - CLICK TO
+  INSTALL", filled solid `TertiaryBrush`/bold `SecondaryBrush` text (the app's own "something notable"
+  signal color, same one the LIVE/BUFFER lamps use) so it's the loudest thing in an otherwise flat
+  monochrome UI - collapsed via a `DataTrigger` on `IsUpdateAvailable` until there's actually something to
+  install.
+- **CI/CD**: new `.github/workflows/release.yml`, triggered on every push to `main` (`windows-latest`
+  runner, since this can only build/publish/package on Windows). Publishes the App project
+  framework-dependent (not self-contained - smaller installer/update payloads; `vpk pack`'s
+  `-f net8-x64-desktop` tells the installer to ensure the .NET 8 desktop runtime is present instead,
+  installing it if missing), packs it with `vpk` (Velopack's CLI, pinned to the same 1.2.0 version as the
+  `Velopack` NuGet package the app references, to keep the on-disk release format and the app's own
+  understanding of it in lockstep), and publishes straight to a GitHub Release (`vpk upload github
+  --publish`) using the workflow's own default `GITHUB_TOKEN` - no extra secrets needed. Version is
+  `1.0.<run_number>`, monotonically increasing per workflow run with no manual tagging required, satisfying
+  Velopack's "each release must be a strictly higher version than the last" requirement for update
+  detection to work at all.
+- **First-time install, not just updates.** The very first copy on a machine still has to come from
+  somewhere other than the in-app button (nothing to update *from* yet) - that's the `Setup.exe` GitHub
+  Releases asset `vpk pack` produces, a real installer wizard (progress bar, install location, Start Menu/
+  Desktop shortcuts, generated uninstaller) downloaded once by hand from the repo's Releases page. Every
+  release after that, the in-app button is how it updates.
+
 - **Visual identity pass.** The app moved from an early tally-lamp red/green/amber palette to a
   strict 4-family system (Primary white / Secondary black / Tertiary pale-lavender signal color /
   Neutral near-black ramp, plus Alert red for recording/destructive-only). Covers the whole app:
@@ -281,7 +339,10 @@ parsing, before applying - `ColorUtils.TryParseHex` itself is untouched (it's al
 
 ## Non-goals (don't add unless explicitly asked)
 
-- Multi-machine/config-file-based settings, installers, auto-update.
+- Multi-machine/config-file-based settings. Installer + auto-update **were** on this list until M19,
+  reversed by explicit request - see M19's detail entry. Don't re-add other multi-machine assumptions
+  (e.g. config that isn't just "whatever this one installed copy needs to update itself") without being
+  asked the same way.
 - Cloud upload/sharing of clips.
 - Support for capture backends other than OBS.
 - Automated tests as a blanket requirement — add them for genuinely tricky logic (e.g.

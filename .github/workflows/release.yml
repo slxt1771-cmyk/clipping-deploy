@@ -1,0 +1,52 @@
+name: Release
+
+# Builds and publishes a new Velopack release every time main changes - this is the "whenever I change
+# something" auto-update source: MainViewModel.CheckForUpdatesAsync (running on the installed app) checks
+# this repo's GitHub Releases for a version newer than whatever's installed. runs-on windows-latest because
+# this is a WPF app - it can only actually build/publish/package on Windows.
+on:
+  push:
+    branches: [main]
+
+# The default GITHUB_TOKEN needs write access to create/publish a release.
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      # Monotonically increasing per this workflow, independent of anything else - satisfies Velopack's
+      # requirement that each release have a strictly higher version than the last for it to be detected
+      # as an update. No manual tagging/version-bumping needed for a routine push.
+      - name: Compute version
+        id: version
+        shell: pwsh
+        run: |
+          $version = "1.0.${{ github.run_number }}"
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      # Framework-dependent (no -r/--self-contained): matches Velopack's own WPF sample. Smaller
+      # installer/update payloads than bundling the whole .NET runtime - vpk pack's -f flag below tells the
+      # installer to ensure the runtime is present (installing it if missing) instead.
+      - name: Publish app
+        run: dotnet publish src/ClippingSoftware.App/ClippingSoftware.App.csproj -c Release -o publish -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Install vpk
+        run: dotnet tool install -g vpk --version 1.2.0
+
+      - name: Pack release
+        run: vpk pack -u ClippingSoftware -v ${{ steps.version.outputs.version }} -p publish -e ClippingSoftware.App.exe -i src/ClippingSoftware.App/Assets/tray.ico -f net8-x64-desktop -o release --packTitle "Clipping Software" --packAuthors "slxt1771-cmyk"
+
+      # --publish (not left as a draft) so CheckForUpdatesAsync on an installed copy actually sees it -
+      # GithubSource only considers published, non-draft releases.
+      - name: Upload release to GitHub
+        run: vpk upload github --repoUrl https://github.com/${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} --publish --tag v${{ steps.version.outputs.version }} --releaseName "v${{ steps.version.outputs.version }}" -o release
