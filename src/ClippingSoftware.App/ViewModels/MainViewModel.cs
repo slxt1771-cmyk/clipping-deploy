@@ -11,8 +11,6 @@ using ClippingSoftware.Data.ClipLibrary;
 using ClippingSoftware.Data.Models;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Velopack;
-using Velopack.Sources;
 
 namespace ClippingSoftware.App.ViewModels;
 
@@ -50,24 +48,6 @@ public partial class MainViewModel : ObservableObject
     private readonly Timer _audioSourceRefreshTimer;
 
     private static readonly TimeSpan AudioSourceRefreshInterval = TimeSpan.FromMinutes(3);
-
-    /// <summary>Repo self-update checks against (GitHub Releases, published by .github/workflows/release.yml
-    /// on every push to main). Null if construction itself somehow throws - every call site below treats
-    /// that the same as "no update available" rather than crashing, since update-checking must never be
-    /// able to break the app it's trying to update.</summary>
-    private readonly UpdateManager? _updateManager;
-
-    private UpdateInfo? _pendingUpdate;
-
-    [ObservableProperty]
-    private bool _isUpdateAvailable;
-
-    /// <summary>Raised once InstallUpdateCommand has finished downloading an update and it's ready to
-    /// apply - App.xaml.cs subscribes and does the actual process-exit/relaunch, since
-    /// UpdateManager.ApplyUpdatesAndRestart force-exits the process itself (not through WPF's normal
-    /// shutdown path) and its own doc comment says callers must clean up state themselves first; App
-    /// already owns exactly that cleanup precedent in OnExit.</summary>
-    public event Action? UpdateReadyToInstall;
 
     public ObsController ObsController => _obsController;
 
@@ -198,17 +178,6 @@ public partial class MainViewModel : ObservableObject
         _audioSourceManager = new AudioSourceManager(_obsController, _audioSourceRepository);
         _draftRepository = new ClipEditDraftRepository(_database);
         _sequenceRepository = new SequenceRepository(_database);
-
-        try
-        {
-            _updateManager = new UpdateManager(new GithubSource("https://github.com/slxt1771-cmyk/clipping-deploy", null, false));
-        }
-        catch
-        {
-            // Best-effort - construction alone shouldn't throw (it doesn't touch the network or require an
-            // installed copy), but if it ever does, updates are just unavailable this session rather than
-            // taking the whole app down with them.
-        }
 
         _ingestCoordinator = new RecordingIngestCoordinator(_obsController, _clipRepository, _audioSourceManager, _tagRepository);
         var sequenceEditor = new SequenceEditorViewModel(_sequenceRepository, _clipRepository, Settings.ExportStorageFolder, _ingestCoordinator);
@@ -347,7 +316,6 @@ public partial class MainViewModel : ObservableObject
     {
         _ = ClipBrowser.LoadAsync();
         _ = GameProfiles.LoadAsync();
-        _ = CheckForUpdatesAsync();
 
         try
         {
@@ -376,64 +344,6 @@ public partial class MainViewModel : ObservableObject
             StatusMessage = $"Startup error: {ex.Message}";
         }
     }
-
-    /// <summary>Checked once on every launch (see InitializeAsync) - not periodically, since "open the app
-    /// and see the update button" is the actual requirement, and it's cheap enough to just check on every
-    /// startup instead of adding a recurring timer for something that only matters right after a launch.</summary>
-    private async Task CheckForUpdatesAsync()
-    {
-        if (_updateManager is null)
-        {
-            return;
-        }
-
-        try
-        {
-            _pendingUpdate = await _updateManager.CheckForUpdatesAsync();
-            IsUpdateAvailable = _pendingUpdate is not null;
-        }
-        catch
-        {
-            // Best-effort - most commonly this means the running copy wasn't installed via the Velopack
-            // installer (e.g. a dev "dotnet run" build, which has no installed version to compare against),
-            // which is expected and not worth surfacing as an error to the user.
-        }
-    }
-
-    /// <summary>Downloads the update found by CheckForUpdatesAsync and, once it's fully on disk, raises
-    /// UpdateReadyToInstall so App.xaml.cs can clean up and hand off to ApplyPendingUpdate - see that
-    /// event's doc comment for why the actual process-exit/relaunch happens there instead of here.</summary>
-    [RelayCommand]
-    private async Task InstallUpdate()
-    {
-        if (_updateManager is null || _pendingUpdate is null)
-        {
-            return;
-        }
-
-        try
-        {
-            StatusMessage = "Downloading update...";
-            await _updateManager.DownloadUpdatesAsync(_pendingUpdate, percent =>
-                // The progress callback isn't guaranteed to run on the UI thread (Velopack's own WPF
-                // sample dispatches it explicitly for the same reason), so this needs the same
-                // App.Current.Dispatcher.Invoke marshaling every other cross-thread callback in this
-                // class already uses.
-                App.Current.Dispatcher.Invoke(() => StatusMessage = $"Downloading update ({percent}%)..."));
-
-            StatusMessage = "Update downloaded - restarting...";
-            UpdateReadyToInstall?.Invoke();
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"Update failed: {ex.Message}";
-        }
-    }
-
-    /// <summary>Called by App.xaml.cs (via UpdateReadyToInstall) after it's finished its own exit cleanup -
-    /// terminates this process and relaunches the updated one. Never called directly by InstallUpdate
-    /// itself; see UpdateReadyToInstall's doc comment for why.</summary>
-    public void ApplyPendingUpdate() => _updateManager?.ApplyUpdatesAndRestart(_pendingUpdate);
 
     [RelayCommand]
     private void Connect()
