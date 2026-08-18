@@ -52,8 +52,14 @@
     <AssemblyTitle>Clipping Software</AssemblyTitle>
     <Product>Clipping Software</Product>
     <!-- Consumed by the installer (see installer/ClippingSoftware.iss, which reads it via the build
-         workflow) so the app version and the Setup.exe version can never drift apart. -->
-    <Version>1.0.0</Version>
+         workflow) so the app version and the Setup.exe version can never drift apart. Guarded so it only
+         applies to a plain local `dotnet build`/`dotnet publish` - CI's `-p:Version=...` (release.yml)
+         arrives as a global property *before* this file is evaluated, and an unconditioned assignment here
+         would silently clobber it back to 1.0.0 on every single build. That's not hypothetical: it happened
+         - every installed build kept reporting itself as 1.0.0.0 via Assembly.GetName().Version regardless
+         of which release was actually installed, so MainViewModel.CheckForUpdatesAsync's comparison against
+         the latest GitHub release never advanced and the update button never cleared. -->
+    <Version Condition="'$(Version)' == ''">1.0.0</Version>
     <!-- Trimming/single-file are deliberately off: WPF doesn't support trimming, and single-file would
          bundle the whole runtime into one exe that has to unpack to temp on every launch. The installer
          ships the folder layout instead, which is also what lets assets\ and tools\ sit beside the exe. -->

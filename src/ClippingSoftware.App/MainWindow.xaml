@@ -148,6 +148,16 @@
                                 <DataTrigger Binding="{Binding IsUpdateAvailable}" Value="True">
                                     <Setter Property="Visibility" Value="Visible"/>
                                 </DataTrigger>
+                                <!-- This button hardcodes its own Foreground above (local value), which
+                                     outranks the base Button style's IsEnabled trigger - that trigger would
+                                     otherwise swap Foreground to DimBrush while leaving this Background
+                                     override alone, so relying on it here would dim to unreadable black-on-
+                                     near-black instead. Dimming the whole button via Opacity sidesteps that
+                                     precedence fight entirely while still reading as "busy, not clickable"
+                                     during the download/install (IsInstallingUpdate via CanInstallUpdate). -->
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Opacity" Value="0.55"/>
+                                </Trigger>
                             </Style.Triggers>
                         </Style>
                     </Button.Style>

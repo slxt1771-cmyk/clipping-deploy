@@ -62,6 +62,14 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private bool _isUpdateAvailable;
 
+    /// <summary>Guards InstallUpdateCommand against a second click while a download/install is already in
+    /// flight - without this, IsUpdateAvailable staying true for the whole (multi-second) download window
+    /// let an impatient re-click kick off a second DownloadUpdateAsync and a second elevated Setup.exe
+    /// launch (RunSilentInstall's UAC prompt) stacked on the first, which is exactly the kind of "app stops
+    /// responding to clicks" state a stray extra UAC secure-desktop prompt produces.</summary>
+    [ObservableProperty]
+    private bool _isInstallingUpdate;
+
     public ObsController ObsController => _obsController;
 
     public AppSettings Settings { get; private set; }
@@ -390,7 +398,9 @@ public partial class MainViewModel : ObservableObject
     /// installer itself (see installer/ClippingSoftware.iss) closes this app's running process and relaunches
     /// it once installed - this method doesn't need to orchestrate that handoff, only get the installer
     /// downloaded and started.</summary>
-    [RelayCommand]
+    private bool CanInstallUpdate() => _pendingUpdate is not null && !IsInstallingUpdate;
+
+    [RelayCommand(CanExecute = nameof(CanInstallUpdate))]
     private async Task InstallUpdate()
     {
         if (_pendingUpdate is null)
@@ -398,6 +408,8 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
+        IsInstallingUpdate = true;
+        InstallUpdateCommand.NotifyCanExecuteChanged();
         try
         {
             StatusMessage = "Downloading update...";
@@ -410,6 +422,8 @@ public partial class MainViewModel : ObservableObject
         catch (Exception ex)
         {
             StatusMessage = $"Update failed: {ex.Message}";
+            IsInstallingUpdate = false;
+            InstallUpdateCommand.NotifyCanExecuteChanged();
         }
     }
 
