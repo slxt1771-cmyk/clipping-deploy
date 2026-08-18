@@ -49,6 +49,18 @@ public class Database
         AddColumnIfMissing(connection, "AppSettings", "TertiaryColorHex", "TEXT NULL");
         AddColumnIfMissing(connection, "AppSettings", "QuaternaryColorHex", "TEXT NULL");
         AddColumnIfMissing(connection, "GameProfiles", "AutoDetectResolution", "INTEGER NOT NULL DEFAULT 0");
+        // MicEnabled/DesktopAudioEnabled collapsed into one AudioEnabled toggle - without this, an install
+        // that predates the change keeps the old columns and is missing AudioEnabled entirely, so every
+        // profile Save/Add fails outright (GameProfileRepository's INSERT/UPDATE name AudioEnabled
+        // explicitly; SQLite errors with "no such column"). Same class of bug as the HasMicTrack/
+        // HasDesktopAudioTrack case below - schema drift silently breaking every existing install until
+        // it's given its own additive migration.
+        if (AddColumnIfMissing(connection, "GameProfiles", "AudioEnabled", "INTEGER NOT NULL DEFAULT 1"))
+        {
+            BackfillAudioEnabledFromLegacyColumns(connection);
+        }
+        DropColumnIfExists(connection, "GameProfiles", "MicEnabled");
+        DropColumnIfExists(connection, "GameProfiles", "DesktopAudioEnabled");
         // First-run setup wizard state. Defaulting HasCompletedFirstRunSetup to 1 for a *pre-existing*
         // row is deliberate and is why this isn't just "DEFAULT 0": an install that predates the wizard
         // has already been configured by hand, so re-running setup on it would be a pointless
@@ -221,6 +233,29 @@ public class Database
         alter.CommandText = $"ALTER TABLE {table} DROP COLUMN {column}";
         alter.ExecuteNonQuery();
         return true;
+    }
+
+    /// <summary>
+    /// One-time conversion for installs that predate the single AudioEnabled toggle: the old MicEnabled/
+    /// DesktopAudioEnabled pair collapses to "on if either was on" - the least disruptive direction, since a
+    /// profile that only had one of the two enabled keeps making sound after the upgrade instead of going
+    /// silently muted. A brand-new install never has these legacy columns, so this is a no-op for it
+    /// (AddColumnIfMissing's DEFAULT 1 is already correct there).
+    /// </summary>
+    private static void BackfillAudioEnabledFromLegacyColumns(SqliteConnection connection)
+    {
+        using (var check = connection.CreateCommand())
+        {
+            check.CommandText = "SELECT COUNT(*) FROM pragma_table_info('GameProfiles') WHERE name = 'MicEnabled'";
+            if (Convert.ToInt64(check.ExecuteScalar()) == 0)
+            {
+                return;
+            }
+        }
+
+        using var update = connection.CreateCommand();
+        update.CommandText = "UPDATE GameProfiles SET AudioEnabled = CASE WHEN MicEnabled != 0 OR DesktopAudioEnabled != 0 THEN 1 ELSE 0 END";
+        update.ExecuteNonQuery();
     }
 
     /// <summary>

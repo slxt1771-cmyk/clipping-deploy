@@ -64,9 +64,16 @@ Project reference graph: `App -> Core, Data, Shared` · `Core -> Data, Shared` �
   message pump) — see the class doc comment for the exact pattern used in `MainWindow`.
 - **Data layer**: `Database` owns the SQLite connection string/schema
   (`%LocalAppData%\ClippingSoftware\app.db`) and creates tables idempotently
-  (`CREATE TABLE IF NOT EXISTS`) on construction — there is no separate migrations mechanism.
-  If you change a table shape, update the `CREATE TABLE` in `Database.Initialize()` directly;
-  existing installs are single-dev-machine, so no migration path is needed.
+  (`CREATE TABLE IF NOT EXISTS`) on construction. That alone only helps a fresh install — the app is
+  packaged and distributed now (see "What this is" above), so an existing install's db file persists
+  across every update and `CREATE TABLE IF NOT EXISTS` is a no-op against a table that already exists
+  with the old shape. `Database.Initialize()` therefore also runs additive migrations via
+  `AddColumnIfMissing`/`DropColumnIfExists` (and a one-off backfill method where a column's *data*,
+  not just its presence, needs converting — see `BackfillAudioTracksJsonFromLegacyColumns` for the
+  pattern). If you change a table shape, update the `CREATE TABLE` in `Database.Initialize()` for
+  fresh installs **and** add the matching `AddColumnIfMissing`/`DropColumnIfExists` calls for existing
+  ones — skipping the second half means every existing install's next Save/Insert against that table
+  fails with a "no such column" SQLite error the moment it hits the changed shape.
   Repositories (`SettingsRepository`, `GameProfileRepository`, `ClipRepository`) use Dapper
   with a private `*Row` class per table to hex the JSON-text columns
   (`ExecutableMatches`, `EncoderJson`) into/out of the domain model.
